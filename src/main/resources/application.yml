@@ -21,6 +21,29 @@ milvus:
 
 # Spring AI Alibaba DashScope 配置
 spring:
+  # 数据库配置
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://39.102.96.8:3306/yu_picture
+    username: lpz
+    password: lpz2003...
+
+  # redis配置
+  data:
+    redis:
+      database: 1
+      host: 39.102.96.8
+      port: 6379
+      timeout: 5000
+      password: lpz2003...
+  # session配置
+  session:
+    store-type: redis
+    # 30天过期
+    timeout: 2592000
+
+
+
   ai:
     dashscope:
       api-key: 'sk-a3cab84eb91a479986d68a2fc4037bc3'  # 从环境变量读取或使用默认值
@@ -36,6 +59,7 @@ spring:
     
     # Spring AI MCP 客户端配置
     # 如果使用mock数据，请注释这部分内容
+
 #    mcp:
 #      client:
 #        enabled: true
@@ -76,3 +100,28 @@ prometheus:
 # CLS 云日志服务配置
 cls:
   mock-enabled: false  # 是否启用 Mock 模式（用于测试，设为 true 返回与告警关联的模拟日志数据）
+
+# MyBatis Plus 配置
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: false # 不自动转换成驼峰命名，数据库表中字段是什么就传过来什么
+    # 仅在开发环境输出日志
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    enable-sql-runner: true # 开启SqlRunner配置
+    db-config:
+      logic-delete-field: isDeleted # 逻辑删除
+      logic-delete-value: 1 # 逻辑已删除值(默认为 1)
+      logic-not-delete-value: 0 # 逻辑未删除值(默认为 0)
+
+# 接口文档配置
+knife4j:
+  enable: true
+  openapi:
+    title: "接口文档"
+    version: 1.0
+    group:
+      default:
+        api-rule: package
+        api-rule-resources:
+          - org.example.controller
