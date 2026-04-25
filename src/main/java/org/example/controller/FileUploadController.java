@@ -1,7 +1,9 @@
 package org.example.controller;
 
+import jakarta.servlet.http.HttpSession;
 import org.example.config.FileUploadConfig;
 import org.example.dto.FileUploadRes;
+import org.example.service.AuthService;
 import org.example.service.VectorIndexService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,8 +33,19 @@ public class FileUploadController {
     @Autowired
     private VectorIndexService vectorIndexService;
 
+    @Autowired
+    private AuthService authService;
+
     @PostMapping(value = "/api/upload", consumes = "multipart/form-data")
-    public ResponseEntity<?> upload(@RequestParam("file") MultipartFile file) {
+    public ResponseEntity<?> upload(@RequestParam("file") MultipartFile file, HttpSession session) {
+        try {
+            if (!authService.isAdmin(session)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body("仅管理员可以上传文档");
+            }
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(e.getMessage());
+        }
+
         if (file.isEmpty()) {
             return ResponseEntity.badRequest().body("文件不能为空");
         }

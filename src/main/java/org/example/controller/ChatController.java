@@ -8,10 +8,14 @@ import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.alibaba.cloud.ai.graph.streaming.OutputType;
 import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
+import jakarta.servlet.http.HttpSession;
 import lombok.Getter;
 import lombok.Setter;
 import org.example.service.AiOpsService;
+import org.example.service.AuthService;
 import org.example.service.ChatService;
+import org.example.service.ConversationPersistenceService;
+import org.example.service.UserProfileService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.tool.ToolCallback;
@@ -47,6 +51,15 @@ public class ChatController {
     private ChatService chatService;
 
     @Autowired
+    private AuthService authService;
+
+    @Autowired
+    private UserProfileService userProfileService;
+
+    @Autowired
+    private ConversationPersistenceService conversationPersistenceService;
+
+    @Autowired
     private ToolCallbackProvider tools;
 
     private final ExecutorService executor = Executors.newCachedThreadPool();
@@ -62,9 +75,10 @@ public class ChatController {
      * 与 /chat_react 逻辑一致，但直接返回完整结果而非流式输出
      */
     @PostMapping("/chat")
-    public ResponseEntity<ApiResponse<ChatResponse>> chat(@RequestBody ChatRequest request) {
+    public ResponseEntity<ApiResponse<ChatResponse>> chat(@RequestBody ChatRequest request, HttpSession httpSession) {
         try {
-            logger.info("收到对话请求 - SessionId: {}, Question: {}", request.getId(), request.getQuestion());
+            Long userId = authService.requireUserId(httpSession);
+            logger.info("收到对话请求 - UserId: {}, SessionId: {}, Question: {}", userId, request.getId(), request.getQuestion());
 
             // 参数校验
             if (request.getQuestion() == null || request.getQuestion().trim().isEmpty()) {
@@ -88,8 +102,10 @@ public class ChatController {
 
             logger.info("开始 ReactAgent 对话（支持自动工具调用）");
             
-            // 构建系统提示词（包含历史消息）
-            String systemPrompt = chatService.buildSystemPrompt(history);
+            // 构建系统提示词（包含历史消息、用户资料和长期记忆）
+            String structuredUserContext = userProfileService.buildStructuredContext(userId);
+            String longTermMemoryContext = conversationPersistenceService.buildLongTermMemoryContext(userId, request.getQuestion());
+            String systemPrompt = chatService.buildSystemPrompt(history, structuredUserContext, longTermMemoryContext);
             
             // 创建 ReactAgent
             ReactAgent agent = chatService.createReactAgent(chatModel, systemPrompt);
@@ -99,6 +115,7 @@ public class ChatController {
             
             // 更新会话历史
             session.addMessage(request.getQuestion(), fullAnswer);
+            conversationPersistenceService.saveRound(userId, request.getId(), request.getQuestion(), fullAnswer);
             logger.info("已更新会话历史 - SessionId: {}, 当前消息对数: {}", 
                 request.getId(), session.getMessagePairCount());
             
@@ -141,8 +158,21 @@ public class ChatController {
      * 支持 session 管理，保留对话历史
      */
     @PostMapping(value = "/chat_stream", produces = "text/event-stream;charset=UTF-8")
-    public SseEmitter chatStream(@RequestBody ChatRequest request) {
+    public SseEmitter chatStream(@RequestBody ChatRequest request, HttpSession httpSession) {
         SseEmitter emitter = new SseEmitter(300000L); // 5分钟超时
+
+        Long userId;
+        try {
+            userId = authService.requireUserId(httpSession);
+        } catch (Exception e) {
+            try {
+                emitter.send(SseEmitter.event().name("message").data(SseMessage.error(e.getMessage()), MediaType.APPLICATION_JSON));
+                emitter.complete();
+            } catch (IOException ioException) {
+                emitter.completeWithError(ioException);
+            }
+            return emitter;
+        }
 
         // 参数校验
         if (request.getQuestion() == null || request.getQuestion().trim().isEmpty()) {
@@ -158,7 +188,7 @@ public class ChatController {
 
         executor.execute(() -> {
             try {
-                logger.info("收到 ReactAgent 对话请求 - SessionId: {}, Question: {}", request.getId(), request.getQuestion());
+                logger.info("收到 ReactAgent 对话请求 - UserId: {}, SessionId: {}, Question: {}", userId, request.getId(), request.getQuestion());
 
                 // 获取或创建会话
                 SessionInfo session = getOrCreateSession(request.getId());
@@ -176,8 +206,10 @@ public class ChatController {
 
                 logger.info("开始 ReactAgent 流式对话（支持自动工具调用）");
                 
-                // 构建系统提示词（包含历史消息）
-                String systemPrompt = chatService.buildSystemPrompt(history);
+                // 构建系统提示词（包含当前轮的历史消息、用户资料和长期记忆）
+                String structuredUserContext = userProfileService.buildStructuredContext(userId);
+                String longTermMemoryContext = conversationPersistenceService.buildLongTermMemoryContext(userId, request.getQuestion());
+                String systemPrompt = chatService.buildSystemPrompt(history, structuredUserContext, longTermMemoryContext);
                 
                 // 创建 ReactAgent
                 ReactAgent agent = chatService.createReactAgent(chatModel, systemPrompt);
@@ -246,6 +278,7 @@ public class ChatController {
                             
                             // 更新会话历史
                             session.addMessage(request.getQuestion(), fullAnswer);
+                            conversationPersistenceService.saveRound(userId, request.getId(), request.getQuestion(), fullAnswer);
                             logger.info("已更新会话历史 - SessionId: {}, 当前消息对数: {}", 
                                 request.getId(), session.getMessagePairCount());
                             

@@ -6,6 +6,7 @@ import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
 import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.alibaba.cloud.ai.graph.exception.GraphRunnerException;
 import org.example.agent.tool.DateTimeTools;
+import org.example.agent.tool.FatLossCalculatorTools;
 import org.example.agent.tool.InternalDocsTools;
 import org.example.agent.tool.QueryLogsTools;
 import org.example.agent.tool.QueryMetricsTools;
@@ -38,6 +39,9 @@ public class ChatService {
     @Autowired
     private QueryMetricsTools queryMetricsTools;
 
+    @Autowired
+    private FatLossCalculatorTools fatLossCalculatorTools;
+
     @Autowired(required = false)  // Mock 模式下才注册，所以设置为 optional,真实环境通过mcp配置注入
     private QueryLogsTools queryLogsTools;
 
@@ -47,6 +51,8 @@ public class ChatService {
     @Value("${spring.ai.dashscope.api-key}")
     private String dashScopeApiKey;
 
+    @Value("${chat.model}")
+    private String model;
     /**
      * 创建 DashScope API 实例
      */
@@ -66,10 +72,10 @@ public class ChatService {
         return DashScopeChatModel.builder()
                 .dashScopeApi(dashScopeApi)
                 .defaultOptions(DashScopeChatOptions.builder()
-                        .withModel(DashScopeChatModel.DEFAULT_MODEL_NAME)
-                        .withTemperature(temperature)
-                        .withMaxToken(maxToken)
-                        .withTopP(topP)
+                        .model(model)
+                        .temperature(temperature)
+                        .maxToken(maxToken)
+                        .topP(topP)
                         .build())
                 .build();
     }
@@ -87,18 +93,32 @@ public class ChatService {
      * @return 完整的系统提示词
      */
     public String buildSystemPrompt(List<Map<String, String>> history) {
+        return buildSystemPrompt(history, null, null);
+    }
+
+    /**
+     * 构建智能减脂 Agent 系统提示词（包含短期历史、结构化资料和长期记忆）
+     */
+    public String buildSystemPrompt(List<Map<String, String>> history, String structuredUserContext, String longTermMemoryContext) {
         StringBuilder systemPromptBuilder = new StringBuilder();
         
-        // 基础系统提示
-        systemPromptBuilder.append("你是一个专业的智能助手，可以获取当前时间、查询天气信息、搜索内部文档知识库，以及查询 Prometheus 告警信息。\n");
-        systemPromptBuilder.append("当用户询问时间相关问题时，使用 getCurrentDateTime 工具。\n");
-        systemPromptBuilder.append("当用户需要查询公司内部文档、流程、最佳实践或技术指南时，使用 queryInternalDocs 工具。\n");
-        systemPromptBuilder.append("当用户需要查询 Prometheus 告警、监控指标或系统告警状态时，使用 queryPrometheusAlerts 工具。\n");
-        systemPromptBuilder.append("当用户需要查询腾讯云日志时，请调用腾讯云mcp服务查询,默认查询地域ap-guangzhou,查询时间范围为近一个月。\n\n");
+        systemPromptBuilder.append("你是一个专业、谨慎、可执行的智能减脂 Agent，基于 ReAct 思路决定是否调用工具。\n");
+        systemPromptBuilder.append("你的核心任务是帮助用户进行科学减脂，包括医学常识检索、热量与营养估算、运动消耗估算、饮食与训练建议。\n");
+        systemPromptBuilder.append("如果问题涉及减脂、营养、体重管理、运动、健康禁忌或医学知识，优先使用 queryInternalDocs 检索知识库；普通闲聊可以直接回答。\n");
+        systemPromptBuilder.append("当需要 BMI、热量、蛋白质或运动消耗估算时，使用 calculateBmi、calculateNutritionTarget 或 calculateExerciseCalories 工具。\n");
+        systemPromptBuilder.append("当用户资料缺失导致无法给出个性化方案时，先说明缺失项并给出可执行的通用建议。\n");
+        systemPromptBuilder.append("涉及疾病、药物、孕产、进食障碍、极端节食等高风险情况时，必须建议咨询医生或注册营养师。\n");
+        systemPromptBuilder.append("回答应结构清晰、语气鼓励，不做绝对医疗诊断，不推荐极端低热量饮食。\n\n");
+
+        if (structuredUserContext != null && !structuredUserContext.isBlank()) {
+            systemPromptBuilder.append("--- 用户结构化信息 ---\n").append(structuredUserContext).append("\n--- 用户结构化信息结束 ---\n\n");
+        }
+        if (longTermMemoryContext != null && !longTermMemoryContext.isBlank()) {
+            systemPromptBuilder.append("--- 长期记忆 ---\n").append(longTermMemoryContext).append("\n--- 长期记忆结束 ---\n\n");
+        }
         
-        // 添加历史消息
         if (!history.isEmpty()) {
-            systemPromptBuilder.append("--- 对话历史 ---\n");
+            systemPromptBuilder.append("--- 短期对话历史 ---\n");
             for (Map<String, String> msg : history) {
                 String role = msg.get("role");
                 String content = msg.get("content");
@@ -108,10 +128,10 @@ public class ChatService {
                     systemPromptBuilder.append("助手: ").append(content).append("\n");
                 }
             }
-            systemPromptBuilder.append("--- 对话历史结束 ---\n\n");
+            systemPromptBuilder.append("--- 短期对话历史结束 ---\n\n");
         }
         
-        systemPromptBuilder.append("请基于以上对话历史，回答用户的新问题。");
+        systemPromptBuilder.append("请基于以上上下文回答用户的新问题。若使用了估算结果，请说明估算前提。边界不确定时先澄清。 ");
         
         return systemPromptBuilder.toString();
     }
@@ -123,10 +143,10 @@ public class ChatService {
     public Object[] buildMethodToolsArray() {
         if (queryLogsTools != null) {
             // Mock 模式：包含 QueryLogsTools
-            return new Object[]{dateTimeTools, internalDocsTools, queryMetricsTools, queryLogsTools};
+            return new Object[]{dateTimeTools, internalDocsTools, queryMetricsTools, queryLogsTools, fatLossCalculatorTools};
         } else {
             // 真实模式：不包含 QueryLogsTools（由 MCP 提供日志查询功能）
-            return new Object[]{dateTimeTools, internalDocsTools, queryMetricsTools};
+            return new Object[]{dateTimeTools, internalDocsTools, queryMetricsTools, fatLossCalculatorTools};
         }
     }
 

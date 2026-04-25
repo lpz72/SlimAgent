@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>智能OnCall助手</title>
+    <title>智能减脂助手</title>
     <link rel="stylesheet" href="styles.css">
     <!-- Markdown 渲染库 -->
     <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
@@ -16,7 +16,7 @@
         <!-- 左侧边栏 -->
         <aside class="sidebar">
             <div class="sidebar-header">
-                <h2 class="sidebar-title">智能OnCall助手</h2>
+                <h2 class="sidebar-title">智能减脂助手</h2>
             </div>
             
             <div class="sidebar-content">
@@ -51,7 +51,7 @@
             </button>
             <div class="chat-container">
                 <div class="welcome-greeting" id="welcomeGreeting">
-                    <p>你好！我是智能Oncall小助手</p>
+                    <p>你好！我是智能减脂小助手</p>
                 </div>
                 <div class="chat-messages" id="chatMessages">
                 </div>
@@ -59,7 +59,7 @@
                 <div class="chat-input-container">
                     <div class="input-group-wrapper">
                         <div class="input-wrapper">
-                            <input type="text" id="messageInput" placeholder="问问智能OnCall助手" maxlength="1000" class="message-input">
+                            <input type="text" id="messageInput" placeholder="问问智能减脂助手" maxlength="1000" class="message-input">
                             <div class="input-bottom-bar">
                                 <div class="tools-btn-wrapper">
                                     <button class="tools-btn" id="toolsBtn" title="更多选项">
@@ -116,6 +116,62 @@
                 </div>
             </div>
         </main>
+    </div>
+
+    <div class="auth-modal" id="authModal">
+        <div class="auth-card">
+            <div class="auth-kicker">智能减脂 Agent</div>
+            <h1>登录后开始个性化对话</h1>
+            <p>系统会结合你的结构化资料、短期对话和长期记忆生成更贴合的减脂建议。</p>
+            <div class="auth-tabs">
+                <button class="auth-tab active" id="loginTab" type="button">登录</button>
+                <button class="auth-tab" id="registerTab" type="button">注册</button>
+            </div>
+            <input class="auth-input" id="authUsername" placeholder="用户名" autocomplete="username">
+            <input class="auth-input" id="authPassword" placeholder="密码" type="password" autocomplete="current-password">
+            <input class="auth-input" id="authNickname" placeholder="昵称（注册时可选）" style="display:none;">
+            <button class="auth-submit" id="authSubmitBtn" type="button">登录</button>
+        </div>
+    </div>
+
+    <button class="user-chip" id="userChip" type="button" style="display:none;"></button>
+
+    <div class="profile-panel" id="profilePanel">
+        <div class="profile-card">
+            <div class="profile-header">
+                <div>
+                    <div class="auth-kicker">Profile</div>
+                    <h2>减脂资料</h2>
+                </div>
+                <button class="profile-close" id="profileCloseBtn" type="button">×</button>
+            </div>
+            <div class="profile-grid">
+                <select class="auth-input" id="profileGender">
+                    <option value="">性别</option>
+                    <option value="MALE">男</option>
+                    <option value="FEMALE">女</option>
+                    <option value="OTHER">其他</option>
+                </select>
+                <input class="auth-input" id="profileAge" type="number" placeholder="年龄">
+                <input class="auth-input" id="profileHeight" type="number" placeholder="身高 cm">
+                <input class="auth-input" id="profileWeight" type="number" placeholder="当前体重 kg">
+                <input class="auth-input" id="profileTargetWeight" type="number" placeholder="目标体重 kg">
+                <select class="auth-input" id="profileActivity">
+                    <option value="">活动水平</option>
+                    <option value="SEDENTARY">久坐</option>
+                    <option value="LIGHT">轻度活动</option>
+                    <option value="MODERATE">中度活动</option>
+                    <option value="ACTIVE">高活动</option>
+                    <option value="VERY_ACTIVE">极高活动</option>
+                </select>
+            </div>
+            <textarea class="auth-input profile-textarea" id="profileDiet" placeholder="饮食偏好，例如少油、素食、乳糖不耐受"></textarea>
+            <textarea class="auth-input profile-textarea" id="profileHealth" placeholder="健康备注/禁忌，例如高血压、膝盖不适、过敏信息"></textarea>
+            <div class="profile-actions">
+                <button class="auth-submit" id="profileSaveBtn" type="button">保存资料</button>
+                <button class="ghost-btn" id="logoutBtn" type="button">退出登录</button>
+            </div>
+        </div>
     </div>
 
     <!-- 加载遮罩层 -->

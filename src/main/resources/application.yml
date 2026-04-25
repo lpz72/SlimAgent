@@ -24,8 +24,8 @@ spring:
   # 数据库配置
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://39.102.96.8:3306/yu_picture
-    username: lpz
+    url: jdbc:mysql://39.102.96.8:3306/slim_agent
+    username: slim_agent
     password: lpz2003...
 
   # redis配置
@@ -90,6 +90,10 @@ document:
 rag:
   top-k: 3  # 检索返回的最相似文档数量
   model: "qwen3-max"  # 大语言模型名称
+
+# chat 配置
+chat:
+  model: "qwen3-max"
 
 # Prometheus 配置
 prometheus:

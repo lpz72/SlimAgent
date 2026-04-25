@@ -14,6 +14,180 @@ body {
     overflow: hidden;
 }
 
+.auth-modal,
+.profile-panel {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 23, 42, 0.45);
+    backdrop-filter: blur(14px);
+    z-index: 10000;
+    padding: 24px;
+}
+
+.auth-card,
+.profile-card {
+    width: min(460px, 100%);
+    background: linear-gradient(145deg, #ffffff 0%, #f7fbff 100%);
+    border: 1px solid rgba(66, 133, 244, 0.16);
+    border-radius: 28px;
+    box-shadow: 0 30px 90px rgba(15, 23, 42, 0.25);
+    padding: 30px;
+}
+
+.profile-card {
+    width: min(720px, 100%);
+}
+
+.auth-kicker {
+    color: #188038;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+}
+
+.auth-card h1,
+.profile-card h2 {
+    font-size: 28px;
+    line-height: 1.2;
+    color: #102a43;
+    margin-bottom: 10px;
+}
+
+.auth-card p {
+    color: #52606d;
+    margin-bottom: 22px;
+}
+
+.auth-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    background: #edf4ff;
+    border-radius: 16px;
+    padding: 6px;
+    margin-bottom: 16px;
+}
+
+.auth-tab,
+.ghost-btn,
+.profile-close {
+    border: none;
+    background: transparent;
+    cursor: pointer;
+}
+
+.auth-tab {
+    padding: 10px 14px;
+    border-radius: 12px;
+    color: #486581;
+    font-weight: 700;
+}
+
+.auth-tab.active {
+    background: #ffffff;
+    color: #1a73e8;
+    box-shadow: 0 8px 18px rgba(26, 115, 232, 0.14);
+}
+
+.auth-input {
+    width: 100%;
+    border: 1px solid #d9e2ec;
+    border-radius: 14px;
+    padding: 13px 14px;
+    margin-bottom: 12px;
+    color: #102a43;
+    background: #ffffff;
+    outline: none;
+    font-size: 14px;
+}
+
+.auth-input:focus {
+    border-color: #1a73e8;
+    box-shadow: 0 0 0 4px rgba(26, 115, 232, 0.12);
+}
+
+.auth-submit {
+    width: 100%;
+    border: none;
+    border-radius: 16px;
+    padding: 13px 16px;
+    background: linear-gradient(135deg, #1a73e8, #188038);
+    color: #ffffff;
+    font-weight: 800;
+    cursor: pointer;
+    box-shadow: 0 14px 28px rgba(26, 115, 232, 0.22);
+}
+
+.user-chip {
+    position: fixed;
+    right: 128px;
+    top: 16px;
+    z-index: 120;
+    border: 1px solid #c8ddff;
+    background: #ffffff;
+    color: #174ea6;
+    border-radius: 999px;
+    padding: 10px 15px;
+    box-shadow: 0 8px 20px rgba(60, 64, 67, 0.12);
+    cursor: pointer;
+    font-weight: 700;
+}
+
+.profile-header,
+.profile-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.profile-header {
+    margin-bottom: 18px;
+}
+
+.profile-close {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    font-size: 26px;
+    color: #52606d;
+}
+
+.profile-close:hover {
+    background: #edf4ff;
+}
+
+.profile-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 12px;
+}
+
+.profile-textarea {
+    min-height: 82px;
+    resize: vertical;
+}
+
+.profile-actions .auth-submit,
+.profile-actions .ghost-btn {
+    flex: 1;
+}
+
+.ghost-btn {
+    border: 1px solid #d9e2ec;
+    border-radius: 16px;
+    padding: 13px 16px;
+    background: #ffffff;
+    color: #52606d;
+    font-weight: 800;
+}
+
+
 /* 主布局 */
 .app-layout {
     display: flex;

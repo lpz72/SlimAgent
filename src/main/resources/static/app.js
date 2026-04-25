@@ -8,6 +8,8 @@ class SuperBizAgentApp {
         this.currentChatHistory = []; // 当前对话的消息历史
         this.chatHistories = this.loadChatHistories(); // 所有历史对话
         this.isCurrentChatFromHistory = false; // 标记当前对话是否是从历史记录加载的
+        this.currentUser = null;
+        this.isAuthModeRegister = false;
         
         this.initializeElements();
         this.bindEvents();
@@ -15,6 +17,7 @@ class SuperBizAgentApp {
         this.initMarkdown();
         this.checkAndSetCentered();
         this.renderChatHistory();
+        this.checkAuthStatus();
     }
 
     // 初始化Markdown配置
@@ -116,6 +119,26 @@ class SuperBizAgentApp {
         this.chatContainer = document.querySelector('.chat-container');
         this.welcomeGreeting = document.getElementById('welcomeGreeting');
         this.chatHistoryList = document.getElementById('chatHistoryList');
+        this.authModal = document.getElementById('authModal');
+        this.loginTab = document.getElementById('loginTab');
+        this.registerTab = document.getElementById('registerTab');
+        this.authUsername = document.getElementById('authUsername');
+        this.authPassword = document.getElementById('authPassword');
+        this.authNickname = document.getElementById('authNickname');
+        this.authSubmitBtn = document.getElementById('authSubmitBtn');
+        this.userChip = document.getElementById('userChip');
+        this.profilePanel = document.getElementById('profilePanel');
+        this.profileCloseBtn = document.getElementById('profileCloseBtn');
+        this.profileSaveBtn = document.getElementById('profileSaveBtn');
+        this.logoutBtn = document.getElementById('logoutBtn');
+        this.profileGender = document.getElementById('profileGender');
+        this.profileAge = document.getElementById('profileAge');
+        this.profileHeight = document.getElementById('profileHeight');
+        this.profileWeight = document.getElementById('profileWeight');
+        this.profileTargetWeight = document.getElementById('profileTargetWeight');
+        this.profileActivity = document.getElementById('profileActivity');
+        this.profileDiet = document.getElementById('profileDiet');
+        this.profileHealth = document.getElementById('profileHealth');
         
         // 初始化时检查是否需要居中
         this.checkAndSetCentered();
@@ -203,6 +226,187 @@ class SuperBizAgentApp {
         if (this.fileInput) {
             this.fileInput.addEventListener('change', (e) => this.handleFileSelect(e));
         }
+
+        if (this.loginTab) {
+            this.loginTab.addEventListener('click', () => this.switchAuthMode(false));
+        }
+        if (this.registerTab) {
+            this.registerTab.addEventListener('click', () => this.switchAuthMode(true));
+        }
+        if (this.authSubmitBtn) {
+            this.authSubmitBtn.addEventListener('click', () => this.submitAuth());
+        }
+        if (this.userChip) {
+            this.userChip.addEventListener('click', () => this.openProfilePanel());
+        }
+        if (this.profileCloseBtn) {
+            this.profileCloseBtn.addEventListener('click', () => this.closeProfilePanel());
+        }
+        if (this.profileSaveBtn) {
+            this.profileSaveBtn.addEventListener('click', () => this.saveProfile());
+        }
+        if (this.logoutBtn) {
+            this.logoutBtn.addEventListener('click', () => this.logout());
+        }
+    }
+
+    async checkAuthStatus() {
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/auth/me`, { credentials: 'include' });
+            const data = await response.json();
+            if (data.code === 200 && data.data && data.data.user) {
+                this.currentUser = data.data.user;
+                this.applyAuthState(data.data.profile);
+            } else {
+                this.showAuthModal(true);
+            }
+        } catch (e) {
+            this.showAuthModal(true);
+        }
+    }
+
+    switchAuthMode(isRegister) {
+        this.isAuthModeRegister = isRegister;
+        this.loginTab?.classList.toggle('active', !isRegister);
+        this.registerTab?.classList.toggle('active', isRegister);
+        if (this.authNickname) {
+            this.authNickname.style.display = isRegister ? 'block' : 'none';
+        }
+        if (this.authSubmitBtn) {
+            this.authSubmitBtn.textContent = isRegister ? '注册并登录' : '登录';
+        }
+    }
+
+    async submitAuth() {
+        const username = this.authUsername?.value.trim();
+        const password = this.authPassword?.value || '';
+        const nickname = this.authNickname?.value.trim();
+        if (!username || !password) {
+            this.showNotification('请输入用户名和密码', 'warning');
+            return;
+        }
+        try {
+            if (this.isAuthModeRegister) {
+                const registerResponse = await fetch(`${this.apiBaseUrl}/auth/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ username, password, nickname })
+                });
+                const registerData = await registerResponse.json();
+                if (registerData.code !== 200) throw new Error(registerData.message || '注册失败');
+            }
+            const response = await fetch(`${this.apiBaseUrl}/auth/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ username, password })
+            });
+            const data = await response.json();
+            if (data.code !== 200) throw new Error(data.message || '登录失败');
+            this.currentUser = data.data;
+            this.applyAuthState(null);
+            this.showNotification('登录成功', 'success');
+            await this.loadProfile();
+        } catch (e) {
+            this.showNotification(e.message, 'error');
+        }
+    }
+
+    applyAuthState(profile) {
+        this.showAuthModal(false);
+        if (this.userChip && this.currentUser) {
+            this.userChip.style.display = 'block';
+            this.userChip.textContent = `${this.currentUser.nickname || this.currentUser.username} · 资料`;
+        }
+        this.updateAdminUploadVisibility();
+        if (profile) {
+            this.fillProfileForm(profile);
+        }
+    }
+
+    showAuthModal(show) {
+        if (this.authModal) {
+            this.authModal.style.display = show ? 'flex' : 'none';
+        }
+    }
+
+    updateAdminUploadVisibility() {
+        if (!this.uploadFileItem) return;
+        const isAdmin = this.currentUser && String(this.currentUser.role).toUpperCase() === 'ADMIN';
+        this.uploadFileItem.style.display = isAdmin ? 'flex' : 'none';
+    }
+
+    async openProfilePanel() {
+        if (this.profilePanel) {
+            this.profilePanel.style.display = 'flex';
+        }
+        await this.loadProfile();
+    }
+
+    closeProfilePanel() {
+        if (this.profilePanel) {
+            this.profilePanel.style.display = 'none';
+        }
+    }
+
+    async loadProfile() {
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/profile`, { credentials: 'include' });
+            const data = await response.json();
+            if (data.code === 200 && data.data) {
+                this.fillProfileForm(data.data);
+            }
+        } catch (e) {
+            console.warn('加载资料失败:', e);
+        }
+    }
+
+    fillProfileForm(profile) {
+        if (!profile) return;
+        if (this.profileGender) this.profileGender.value = profile.gender || '';
+        if (this.profileAge) this.profileAge.value = profile.age || '';
+        if (this.profileHeight) this.profileHeight.value = profile.heightCm || '';
+        if (this.profileWeight) this.profileWeight.value = profile.weightKg || '';
+        if (this.profileTargetWeight) this.profileTargetWeight.value = profile.targetWeightKg || '';
+        if (this.profileActivity) this.profileActivity.value = profile.activityLevel || '';
+        if (this.profileDiet) this.profileDiet.value = profile.dietPreference || '';
+        if (this.profileHealth) this.profileHealth.value = profile.healthNotes || '';
+    }
+
+    async saveProfile() {
+        try {
+            const payload = {
+                gender: this.profileGender?.value || null,
+                age: this.profileAge?.value ? Number(this.profileAge.value) : null,
+                heightCm: this.profileHeight?.value ? Number(this.profileHeight.value) : null,
+                weightKg: this.profileWeight?.value ? Number(this.profileWeight.value) : null,
+                targetWeightKg: this.profileTargetWeight?.value ? Number(this.profileTargetWeight.value) : null,
+                activityLevel: this.profileActivity?.value || null,
+                dietPreference: this.profileDiet?.value || null,
+                healthNotes: this.profileHealth?.value || null
+            };
+            const response = await fetch(`${this.apiBaseUrl}/profile`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify(payload)
+            });
+            const data = await response.json();
+            if (data.code !== 200) throw new Error(data.message || '保存失败');
+            this.showNotification('资料已保存', 'success');
+            this.closeProfilePanel();
+        } catch (e) {
+            this.showNotification(e.message, 'error');
+        }
+    }
+
+    async logout() {
+        await fetch(`${this.apiBaseUrl}/auth/logout`, { method: 'POST', credentials: 'include' });
+        this.currentUser = null;
+        this.showAuthModal(true);
+        if (this.userChip) this.userChip.style.display = 'none';
+        this.closeProfilePanel();
     }
 
     // 切换工具菜单显示/隐藏
@@ -357,7 +561,12 @@ class SuperBizAgentApp {
     loadChatHistories() {
         try {
             const stored = localStorage.getItem('chatHistories');
-            return stored ? JSON.parse(stored) : [];
+            const histories = stored ? JSON.parse(stored) : [];
+            const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+            return histories.filter(history => {
+                const updatedAt = new Date(history.updatedAt || history.createdAt || 0).getTime();
+                return updatedAt >= thirtyDaysAgo;
+            });
         } catch (e) {
             console.error('加载历史对话失败:', e);
             return [];
@@ -540,7 +749,7 @@ class SuperBizAgentApp {
         // 更新输入框状态
         if (this.messageInput) {
             this.messageInput.disabled = this.isStreaming;
-            this.messageInput.placeholder = '问问智能OnCall助手';
+            this.messageInput.placeholder = '问问智能减脂助手';
         }
     }
 
@@ -558,6 +767,12 @@ class SuperBizAgentApp {
         
         if (!message) {
             this.showNotification('请输入消息内容', 'warning');
+            return;
+        }
+
+        if (!this.currentUser) {
+            this.showNotification('请先登录后再对话', 'warning');
+            this.showAuthModal(true);
             return;
         }
 
@@ -610,6 +825,7 @@ class SuperBizAgentApp {
                 headers: {
                     'Content-Type': 'application/json',
                 },
+                credentials: 'include',
                 body: JSON.stringify({
                     Id: this.sessionId,
                     Question: message
@@ -666,6 +882,7 @@ class SuperBizAgentApp {
                 headers: {
                     'Content-Type': 'application/json',
                 },
+                credentials: 'include',
                 body: JSON.stringify({
                     Id: this.sessionId,
                     Question: message
@@ -1046,6 +1263,17 @@ class SuperBizAgentApp {
             return;
         }
 
+        if (!this.currentUser) {
+            this.showNotification('请先登录', 'warning');
+            this.showAuthModal(true);
+            return;
+        }
+
+        if (!this.currentUser || String(this.currentUser.role).toUpperCase() !== 'ADMIN') {
+            this.showNotification('仅管理员可以上传文档', 'warning');
+            return;
+        }
+
         // 锁定前端并显示上传遮罩层
         this.isStreaming = true;
         this.updateUI();
@@ -1059,6 +1287,7 @@ class SuperBizAgentApp {
             // 发送上传请求
             const response = await fetch(`${this.apiBaseUrl}/upload`, {
                 method: 'POST',
+                credentials: 'include',
                 body: formData
             });
 
