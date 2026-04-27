@@ -3,6 +3,7 @@ package org.example.service;
 import jakarta.annotation.Resource;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.rag.preretrieval.query.transformation.RewriteQueryTransformer;
+import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
@@ -17,6 +18,7 @@ public class IntentService {
 
     @Resource
     private RagService ragService;
+
 
     private final ChatClient chatClient;
 

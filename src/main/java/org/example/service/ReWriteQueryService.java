@@ -1,6 +1,8 @@
 package org.example.service;
 
+import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatModel;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.stereotype.Service;
 
 /**
@@ -11,8 +13,8 @@ public class ReWriteQueryService {
 
     private final ChatClient chatClient;
 
-    public ReWriteQueryService(ChatClient.Builder chatClientBuilder) {
-        this.chatClient = chatClientBuilder.build();
+    public ReWriteQueryService(ChatModel chatModel) {
+        this.chatClient = ChatClient.builder(chatModel).build();
     }
 
     public String reWrite(String query) {

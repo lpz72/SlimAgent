@@ -6,6 +6,9 @@ import org.example.service.ChatService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
 /**
@@ -55,11 +58,12 @@ public class IntentRecognizer {
           用户输入：{{input}}
           """;
 
-    private final ChatClient chatClient;
+//    private final ChatClient chatClient;
 
-    public IntentRecognizer (ChatClient.Builder chatClientBuilder) {
-        this.chatClient = chatClientBuilder.build();
-    }
+    @Resource
+    @Lazy
+    private ChatModel chatModel;
+
 
 
     /**
@@ -71,7 +75,7 @@ public class IntentRecognizer {
     public Intent recognize(String userInput) {
         try {
             String prompt = INTENT_PROMPT_TEMPLATE.replace("{{input}}", userInput);
-            String result = chatClient.prompt().user(prompt).call().content();
+            String result = chatModel.call(new Prompt(prompt)).getResult().getOutput().getText();
 
             if (result != null && result.trim().toUpperCase().contains("RAG")) {
                 logger.info("[意图识别] RAG — " + userInput);

@@ -20,6 +20,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -58,12 +59,13 @@ public class ChatController {
     private ConversationPersistenceService conversationPersistenceService;
 
     @Autowired
-    private ToolCallbackProvider tools;
+    private ToolCallback[] toolCallback;
 
     @Resource
     private IntentRecognizer intentRecognizer;
 
     @Resource
+    @Lazy
     private IntentService intentService;
 
     @Resource
@@ -391,12 +393,11 @@ public class ChatController {
                                 .build())
                         .build();
 
-                ToolCallback[] toolCallbacks = tools.getToolCallbacks();
 
                 emitter.send(SseEmitter.event().name("message").data(SseMessage.content("正在读取告警并拆解任务...\n")));
                 
                 // 调用 AiOpsService 执行分析流程
-                Optional<OverAllState> overAllStateOptional = aiOpsService.executeAiOpsAnalysis(chatModel, toolCallbacks);
+                Optional<OverAllState> overAllStateOptional = aiOpsService.executeAiOpsAnalysis(chatModel, toolCallback);
 
                 if (overAllStateOptional.isEmpty()) {
                     emitter.send(SseEmitter.event().name("message")
