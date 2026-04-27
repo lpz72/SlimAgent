@@ -50,6 +50,7 @@ spring:
       chat:
         options:
           timeout: 180000  # 超时时间180秒（3分钟）
+          model: "qwen3-max"
       retry:
         max-attempts: 3  # 最大重试次数
         backoff:
@@ -88,8 +89,22 @@ document:
 
 # RAG 配置
 rag:
-  top-k: 3  # 检索返回的最相似文档数量
+  top-k: 5  # 粗排数量
   model: "qwen3-max"  # 大语言模型名称
+#  hybrid:
+#    enabled: true  # 是否启用混合检索：向量召回 + BM25 重排
+#    candidate-multiplier: 4  # 向量召回候选数 = top-k * candidate-multiplier
+#    vector-weight: 0.65  # 融合排序中的向量相似度权重
+#    bm25-weight: 0.35  # 融合排序中的 BM25 关键词匹配权重
+#    bm25-k1: 1.5
+#    bm25-b: 0.75
+  rerank:
+    enabled: true  # 是否启用重排序模型
+    model: "gte-rerank-v2"  # DashScope 文本重排序模型
+    url: "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
+    timeout-ms: 15000
+    top-k: 3 # 精排数量
+
 
 # chat 配置
 chat:
@@ -119,13 +134,34 @@ mybatis-plus:
       logic-not-delete-value: 0 # 逻辑未删除值(默认为 0)
 
 # 接口文档配置
+#knife4j:
+#  enable: true
+#  openapi:
+#    title: "接口文档"
+#    version: 1.0
+#    group:
+#      default:
+#        api-rule: package
+#        api-rule-resources:
+#springdoc:
+#  group-configs:
+#    - group: default
+#      packages-to-scan: org.example.controller
+
+# springdoc-openapi项目配置
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+  group-configs:
+    - group: 'default'
+      paths-to-match: '/**'
+      packages-to-scan: org.example.controller
+# knife4j的增强配置，不需要增强可以不配
 knife4j:
   enable: true
-  openapi:
-    title: "接口文档"
-    version: 1.0
-    group:
-      default:
-        api-rule: package
-        api-rule-resources:
-          - org.example.controller
+  setting:
+    language: zh_cn

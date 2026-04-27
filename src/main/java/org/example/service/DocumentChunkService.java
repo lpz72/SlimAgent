@@ -1,7 +1,7 @@
 package org.example.service;
 
 import org.example.config.DocumentChunkConfig;
-import org.example.dto.DocumentChunk;
+import org.example.model.dto.DocumentChunk;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;

@@ -2,7 +2,7 @@ package org.example.controller;
 
 import jakarta.servlet.http.HttpSession;
 import org.example.config.FileUploadConfig;
-import org.example.dto.FileUploadRes;
+import org.example.model.dto.FileUploadRes;
 import org.example.service.AuthService;
 import org.example.service.VectorIndexService;
 import org.slf4j.Logger;

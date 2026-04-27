@@ -257,6 +257,7 @@ class SuperBizAgentApp {
             if (data.code === 200 && data.data && data.data.user) {
                 this.currentUser = data.data.user;
                 this.applyAuthState(data.data.profile);
+                await this.loadSessionSummaries();
             } else {
                 this.showAuthModal(true);
             }
@@ -307,6 +308,7 @@ class SuperBizAgentApp {
             this.currentUser = data.data;
             this.applyAuthState(null);
             this.showNotification('登录成功', 'success');
+            await this.loadSessionSummaries();
             await this.loadProfile();
         } catch (e) {
             this.showNotification(e.message, 'error');
@@ -404,6 +406,9 @@ class SuperBizAgentApp {
     async logout() {
         await fetch(`${this.apiBaseUrl}/auth/logout`, { method: 'POST', credentials: 'include' });
         this.currentUser = null;
+        this.chatHistories = [];
+        this.saveChatHistories();
+        this.renderChatHistory();
         this.showAuthModal(true);
         if (this.userChip) this.userChip.style.display = 'none';
         this.closeProfilePanel();
@@ -511,7 +516,8 @@ class SuperBizAgentApp {
             title: title,
             messages: [...this.currentChatHistory],
             createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
+            updatedAt: new Date().toISOString(),
+            detailLoaded: true
         };
         
         // 添加到历史记录列表的开头
@@ -543,6 +549,7 @@ class SuperBizAgentApp {
         const history = this.chatHistories[existingIndex];
         history.messages = [...this.currentChatHistory];
         history.updatedAt = new Date().toISOString();
+        history.detailLoaded = true;
         
         // 如果标题需要更新（第一条消息改变了）
         const firstUserMessage = this.currentChatHistory.find(msg => msg.type === 'user');
@@ -581,6 +588,52 @@ class SuperBizAgentApp {
             console.error('保存历史对话失败:', e);
         }
     }
+
+    async loadSessionSummaries() {
+        if (!this.currentUser) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/chat/sessions`, {
+                credentials: 'include'
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP错误: ${response.status}`);
+            }
+
+            const data = await response.json();
+            if (data.code !== 200 || !Array.isArray(data.data)) {
+                throw new Error(data.message || '获取会话列表失败');
+            }
+
+            this.mergeSessionSummaries(data.data);
+            this.saveChatHistories();
+            this.renderChatHistory();
+        } catch (error) {
+            console.error('加载会话列表失败:', error);
+            this.showNotification(error.message || '加载会话列表失败', 'error');
+        }
+    }
+
+    mergeSessionSummaries(sessionSummaries) {
+        const localHistoryById = new Map(this.chatHistories.map(history => [history.id, history]));
+
+        this.chatHistories = sessionSummaries
+            .filter(summary => summary && summary.sessionId)
+            .map(summary => {
+                const cachedHistory = localHistoryById.get(summary.sessionId);
+                return {
+                    id: summary.sessionId,
+                    title: summary.title || cachedHistory?.title || '新对话',
+                    messages: Array.isArray(cachedHistory?.messages) ? cachedHistory.messages : [],
+                    createdAt: summary.createTime || cachedHistory?.createdAt || new Date().toISOString(),
+                    updatedAt: summary.updateTime || cachedHistory?.updatedAt || summary.createTime || new Date().toISOString(),
+                    detailLoaded: Array.isArray(cachedHistory?.messages) && cachedHistory.messages.length > 0
+                };
+            });
+    }
     
     // 渲染历史对话列表
     renderChatHistory() {
@@ -594,7 +647,7 @@ class SuperBizAgentApp {
             return;
         }
         
-        this.chatHistories.forEach((history, index) => {
+        this.chatHistories.forEach((history) => {
             const historyItem = document.createElement('div');
             historyItem.className = 'history-item';
             historyItem.dataset.historyId = history.id;
@@ -612,8 +665,12 @@ class SuperBizAgentApp {
             
             // 点击历史项加载对话
             historyItem.addEventListener('click', (e) => {
-                if (!e.target.closest('.history-item-delete')) {
-                    this.loadChatHistory(history.id);
+                const target = e.target instanceof Element ? e.target : null;
+                if (!target?.closest('.history-item-delete')) {
+                    this.loadChatHistory(history.id).catch(error => {
+                        console.error('加载历史对话失败:', error);
+                        this.showNotification(error.message || '加载历史对话失败', 'error');
+                    });
                 }
             });
             
@@ -621,7 +678,10 @@ class SuperBizAgentApp {
             const deleteBtn = historyItem.querySelector('.history-item-delete');
             deleteBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                this.deleteChatHistory(history.id);
+                this.deleteChatHistory(history.id).catch(error => {
+                    console.error('删除历史对话失败:', error);
+                    this.showNotification(error.message || '删除历史对话失败', 'error');
+                });
             });
             
             this.chatHistoryList.appendChild(historyItem);
@@ -629,9 +689,14 @@ class SuperBizAgentApp {
     }
     
     // 加载历史对话
-    loadChatHistory(historyId) {
-        const history = this.chatHistories.find(h => h.id === historyId);
+    async loadChatHistory(historyId) {
+        let history = this.chatHistories.find(h => h.id === historyId);
+        if (!history || !Array.isArray(history.messages) || history.messages.length === 0) {
+            history = await this.fetchAndCacheChatHistory(historyId);
+        }
+
         if (!history) {
+            this.showNotification('会话不存在或已失效', 'warning');
             return;
         }
         
@@ -663,9 +728,79 @@ class SuperBizAgentApp {
         this.checkAndSetCentered();
         this.renderChatHistory();
     }
+
+    async fetchAndCacheChatHistory(historyId) {
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/chat/session/${encodeURIComponent(historyId)}`, {
+                credentials: 'include'
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP错误: ${response.status}`);
+            }
+
+            const data = await response.json();
+            if (data.code !== 200 || !data.data) {
+                throw new Error(data.message || '获取会话信息失败');
+            }
+
+            const history = this.convertSessionInfoToChatHistory(data.data);
+            if (!history) {
+                throw new Error('会话消息格式异常');
+            }
+
+            const existingIndex = this.chatHistories.findIndex(item => item.id === history.id);
+            if (existingIndex === -1) {
+                this.chatHistories.unshift(history);
+            } else {
+                this.chatHistories[existingIndex] = history;
+            }
+
+            if (this.chatHistories.length > 50) {
+                this.chatHistories = this.chatHistories.slice(0, 50);
+            }
+
+            this.saveChatHistories();
+            return history;
+        } catch (error) {
+            console.error('从服务端获取会话失败:', error);
+            throw error;
+        }
+    }
+
+    convertSessionInfoToChatHistory(sessionInfo) {
+        if (!sessionInfo || !sessionInfo.sessionId) {
+            return null;
+        }
+
+        const messages = Array.isArray(sessionInfo.messages)
+            ? sessionInfo.messages.map(message => ({
+                type: message.role === 'assistant' ? 'assistant' : 'user',
+                content: message.content || '',
+                timestamp: message.createdAt || new Date().toISOString()
+            })).filter(message => message.content)
+            : [];
+
+        return {
+            id: sessionInfo.sessionId,
+            title: sessionInfo.title || this.buildChatTitle(messages),
+            messages,
+            createdAt: sessionInfo.createTime || new Date().toISOString(),
+            updatedAt: sessionInfo.updateTime || sessionInfo.createTime || new Date().toISOString(),
+            detailLoaded: true
+        };
+    }
+
+    buildChatTitle(messages) {
+        const firstUserMessage = messages.find(message => message.type === 'user');
+        if (!firstUserMessage || !firstUserMessage.content) {
+            return '新对话';
+        }
+        return firstUserMessage.content.substring(0, 30) + (firstUserMessage.content.length > 30 ? '...' : '');
+    }
     
     // 删除历史对话
-    deleteChatHistory(historyId) {
+    async deleteChatHistory(historyId) {
         this.chatHistories = this.chatHistories.filter(h => h.id !== historyId);
         this.saveChatHistories();
         this.renderChatHistory();
@@ -677,7 +812,31 @@ class SuperBizAgentApp {
                 this.chatMessages.innerHTML = '';
             }
             this.sessionId = this.generateSessionId();
+            this.isCurrentChatFromHistory = false;
             this.checkAndSetCentered();
+        }
+
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/chat/clear`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ id: historyId })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP错误: ${response.status}`);
+            }
+
+            const data = await response.json();
+            if (data.code !== 200) {
+                throw new Error(data.message || '删除会话失败');
+            }
+
+            this.showNotification('会话已删除', 'success');
+        } catch (error) {
+            console.error('后端删除会话失败:', error);
+            this.showNotification(error.message || '后端删除会话失败', 'error');
         }
     }
 
@@ -827,8 +986,8 @@ class SuperBizAgentApp {
                 },
                 credentials: 'include',
                 body: JSON.stringify({
-                    Id: this.sessionId,
-                    Question: message
+                    id: this.sessionId,
+                    question: message
                 })
             });
 
@@ -884,8 +1043,8 @@ class SuperBizAgentApp {
                 },
                 credentials: 'include',
                 body: JSON.stringify({
-                    Id: this.sessionId,
-                    Question: message
+                    id: this.sessionId,
+                    question: message
                 })
             });
 

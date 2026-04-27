@@ -18,8 +18,13 @@ import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PostConstruct;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * RAG (Retrieval-Augmented Generation) 服务
@@ -78,7 +83,7 @@ public class RagService {
             logger.info("收到 RAG 流式查询: {}", question);
 
             // 1. 从向量数据库检索相关文档
-            List<VectorSearchService.SearchResult> searchResults = 
+            List<VectorSearchService.SearchResult> searchResults =
                 vectorSearchService.searchSimilarDocuments(question, topK);
 
             // 发送检索结果
@@ -138,7 +143,7 @@ public class RagService {
      * @param history 历史消息列表
      * @param callback 流式回调接口
      */
-    private void generateAnswerStream(String prompt, List<Map<String, String>> history, StreamCallback callback) 
+    private void generateAnswerStream(String prompt, List<Map<String, String>> history, StreamCallback callback)
             throws NoApiKeyException, ApiException, InputRequiredException {
         
         // 构建消息列表：历史消息 + 当前问题
@@ -218,6 +223,96 @@ public class RagService {
 
         callback.onComplete(finalContent.toString(), reasoningContent.toString());
         logger.info("已调用 onComplete 回调");
+    }
+
+
+    /**
+     * 非流式处理用户问题（不带历史消息）
+     *
+     * @param question 用户问题
+     */
+    public String query(String question) {
+        try {
+            logger.info("收到 RAG 流式查询: {}", question);
+
+            // 1. 从向量数据库检索相关文档
+            List<VectorSearchService.SearchResult> searchResults =
+                    vectorSearchService.searchSimilarDocuments(question, topK);
+
+
+            if (searchResults.isEmpty()) {
+                logger.warn("未找到相关文档");
+                return "抱歉，我在知识库中没有找到相关信息来回答您的问题。";
+            }
+
+            // 2. 构建上下文和提示词
+            String context = buildContext(searchResults);
+            String prompt = buildPrompt(question, context);
+
+            // 3. 非流式调用大语言模型（不传入历史消息）
+            return generateAnswer(prompt, new ArrayList<>());
+
+        } catch (Exception e) {
+            logger.error("RAG 流式查询失败", e);
+        }
+        return "抱歉，我在知识库中没有找到相关信息来回答您的问题。";
+    }
+
+    /**
+     * 生成答案（非流式）
+     *
+     * @param prompt 当前问题的提示词
+     * @param history 历史消息列表
+     */
+    private String generateAnswer(String prompt, List<Map<String, String>> history)
+            throws NoApiKeyException, ApiException, InputRequiredException {
+
+        // 构建消息列表：历史消息 + 当前问题
+        List<Message> messages = new ArrayList<>();
+
+        // 添加历史消息
+        for (Map<String, String> historyMsg : history) {
+            String role = historyMsg.get("role");
+            String content = historyMsg.get("content");
+
+            if ("user".equals(role)) {
+                messages.add(Message.builder()
+                        .role(Role.USER.getValue())
+                        .content(content)
+                        .build());
+            } else if ("assistant".equals(role)) {
+                messages.add(Message.builder()
+                        .role(Role.ASSISTANT.getValue())
+                        .content(content)
+                        .build());
+            }
+        }
+
+        // 添加当前用户问题
+        Message userMsg = Message.builder()
+                .role(Role.USER.getValue())
+                .content(prompt)
+                .build();
+        messages.add(userMsg);
+
+        logger.debug("发送给AI模型的消息数量: {}（包含 {} 条历史消息）",
+                messages.size(), history.size());
+
+        GenerationParam param = GenerationParam.builder()
+                .apiKey(apiKey)
+                .model(model)
+                .incrementalOutput(true)
+                .resultFormat("message")
+                .messages(messages)
+                .build();
+
+        logger.info("开始调用AI模型流式接口...");
+
+        String result = generation.call(param).getOutput().getChoices().get(0).getMessage().getContent();;
+
+        logger.info("AI模型响应完成，总内容长度: {}", result.length());
+
+        return result;
     }
 
     /**

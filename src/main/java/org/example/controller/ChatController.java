@@ -8,14 +8,13 @@ import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.alibaba.cloud.ai.graph.streaming.OutputType;
 import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
+import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpSession;
-import lombok.Getter;
-import lombok.Setter;
-import org.example.service.AiOpsService;
-import org.example.service.AuthService;
-import org.example.service.ChatService;
-import org.example.service.ConversationPersistenceService;
-import org.example.service.UserProfileService;
+import org.example.agent.Intent;
+import org.example.model.SessionInfo;
+import org.example.agent.intent.IntentRecognizer;
+import org.example.model.dto.*;
+import org.example.service.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.tool.ToolCallback;
@@ -32,7 +31,6 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * 统一 API 控制器
@@ -62,13 +60,22 @@ public class ChatController {
     @Autowired
     private ToolCallbackProvider tools;
 
+    @Resource
+    private IntentRecognizer intentRecognizer;
+
+    @Resource
+    private IntentService intentService;
+
+    @Resource
+    private ReWriteQueryService reWriteQueryService;
+
     private final ExecutorService executor = Executors.newCachedThreadPool();
 
     // 存储会话信息
     private final Map<String, SessionInfo> sessions = new ConcurrentHashMap<>();
-    
-    // 最大历史消息窗口大小（成对计算：用户消息+AI回复=1对）
-    private static final int MAX_WINDOW_SIZE = 6;
+
+    @Resource
+    private SessionInfoService sessionInfoService;
 
     /**
      * 普通对话接口（支持工具调用）
@@ -86,6 +93,7 @@ public class ChatController {
                 return ResponseEntity.ok(ApiResponse.success(ChatResponse.error("问题内容不能为空")));
             }
 
+
             // 获取或创建会话
             SessionInfo session = getOrCreateSession(request.getId());
             
@@ -97,25 +105,42 @@ public class ChatController {
             DashScopeApi dashScopeApi = chatService.createDashScopeApi();
             DashScopeChatModel chatModel = chatService.createStandardChatModel(dashScopeApi);
 
-            // 记录可用工具
-            chatService.logAvailableTools();
+            String query = request.getQuestion();
+            String reWriteQuery = "";
 
-            logger.info("开始 ReactAgent 对话（支持自动工具调用）");
-            
-            // 构建系统提示词（包含历史消息、用户资料和长期记忆）
-            String structuredUserContext = userProfileService.buildStructuredContext(userId);
-            String longTermMemoryContext = conversationPersistenceService.buildLongTermMemoryContext(userId, request.getQuestion());
-            String systemPrompt = chatService.buildSystemPrompt(history, structuredUserContext, longTermMemoryContext);
-            
-            // 创建 ReactAgent
-            ReactAgent agent = chatService.createReactAgent(chatModel, systemPrompt);
-            
-            // 执行对话
-            String fullAnswer = chatService.executeChat(agent, request.getQuestion());
-            
+            // 进行意图识别
+            Intent intent = intentRecognizer.recognize(query);
+            logger.info("意图识别结果: {}", intent.name());
+            String fullAnswer = "";
+            if (intent == Intent.GENERAL) {
+                fullAnswer = intentService.GeneralIntent(history, query);
+            } else if (intent == Intent.RAG) {
+                // 查询改写
+                reWriteQuery = reWriteQueryService.reWrite(query);
+                logger.info("改写后的问题: {}", reWriteQuery);
+                fullAnswer = intentService.RagIntent(reWriteQuery);
+            } else {
+                reWriteQuery = reWriteQueryService.reWrite(query);
+                // 记录可用工具
+                chatService.logAvailableTools();
+
+                logger.info("开始 ReactAgent 流式对话（支持自动工具调用）");
+
+                // 构建系统提示词（包含当前轮的历史消息、用户资料和长期记忆）
+                String structuredUserContext = userProfileService.buildStructuredContext(userId);
+                String longTermMemoryContext = conversationPersistenceService.buildLongTermMemoryContext(userId, query);
+                String systemPrompt = chatService.buildSystemPrompt(history, structuredUserContext, longTermMemoryContext);
+
+                // 创建 ReactAgent
+                ReactAgent agent = chatService.createReactAgent(chatModel, systemPrompt);
+                // 执行对话
+                fullAnswer = chatService.executeChat(agent, reWriteQuery);
+            }
+
+
             // 更新会话历史
-            session.addMessage(request.getQuestion(), fullAnswer);
-            conversationPersistenceService.saveRound(userId, request.getId(), request.getQuestion(), fullAnswer);
+            sessionInfoService.addMessage(session,query, fullAnswer, httpSession);
+            conversationPersistenceService.saveRound(userId, request.getId(), query, fullAnswer);
             logger.info("已更新会话历史 - SessionId: {}, 当前消息对数: {}", 
                 request.getId(), session.getMessagePairCount());
             
@@ -128,27 +153,28 @@ public class ChatController {
     }
 
     /**
-     * 清空会话历史
+     * 删除会话历史
      */
     @PostMapping("/chat/clear")
-    public ResponseEntity<ApiResponse<String>> clearChatHistory(@RequestBody ClearRequest request) {
+    public ResponseEntity<ApiResponse<String>> clearChatHistory(@RequestBody ClearRequest request, HttpSession httpSession) {
         try {
-            logger.info("收到清空会话历史请求 - SessionId: {}", request.getId());
+            Long userId = authService.requireUserId(httpSession);
+            logger.info("收到删除会话历史请求 - UserId: {}, SessionId: {}", userId, request.getId());
 
             if (request.getId() == null || request.getId().isEmpty()) {
                 return ResponseEntity.ok(ApiResponse.error("会话ID不能为空"));
             }
 
-            SessionInfo session = sessions.get(request.getId());
-            if (session != null) {
-                session.clearHistory();
-                return ResponseEntity.ok(ApiResponse.success("会话历史已清空"));
-            } else {
+            boolean deleted = conversationPersistenceService.deleteSession(userId, request.getId());
+            sessions.remove(request.getId());
+            if (!deleted) {
                 return ResponseEntity.ok(ApiResponse.error("会话不存在"));
             }
 
+            return ResponseEntity.ok(ApiResponse.success("会话历史已删除"));
+
         } catch (Exception e) {
-            logger.error("清空会话历史失败", e);
+            logger.error("删除会话历史失败", e);
             return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
         }
     }
@@ -192,64 +218,96 @@ public class ChatController {
 
                 // 获取或创建会话
                 SessionInfo session = getOrCreateSession(request.getId());
-                
+
+
                 // 获取历史消息
                 List<Map<String, String>> history = session.getHistory();
                 logger.info("ReactAgent 会话历史消息对数: {}", history.size() / 2);
+
 
                 // 创建 DashScope API 和 ChatModel
                 DashScopeApi dashScopeApi = chatService.createDashScopeApi();
                 DashScopeChatModel chatModel = chatService.createStandardChatModel(dashScopeApi);
 
-                // 记录可用工具
-                chatService.logAvailableTools();
+                String query = request.getQuestion();
+                String reWriteQuery = "";
 
-                logger.info("开始 ReactAgent 流式对话（支持自动工具调用）");
-                
-                // 构建系统提示词（包含当前轮的历史消息、用户资料和长期记忆）
-                String structuredUserContext = userProfileService.buildStructuredContext(userId);
-                String longTermMemoryContext = conversationPersistenceService.buildLongTermMemoryContext(userId, request.getQuestion());
-                String systemPrompt = chatService.buildSystemPrompt(history, structuredUserContext, longTermMemoryContext);
-                
-                // 创建 ReactAgent
-                ReactAgent agent = chatService.createReactAgent(chatModel, systemPrompt);
-                
+                // 进行意图识别
+                Intent intent = intentRecognizer.recognize(query);
+                logger.info("意图识别结果: {}", intent.name());
+
+                Flux<Object> stream = null;
+                if (intent == Intent.GENERAL) {
+                    stream = intentService.GeneralIntentStream(history, query);
+                } else if (intent == Intent.RAG) {
+                    // 查询改写
+                    reWriteQuery = reWriteQueryService.reWrite(query);
+                    stream = intentService.RagIntentStream(reWriteQuery);
+                } else {
+                    reWriteQuery = reWriteQueryService.reWrite(query);
+                    // 记录可用工具
+                    chatService.logAvailableTools();
+
+                    logger.info("开始 ReactAgent 流式对话（支持自动工具调用）");
+
+                    // 构建系统提示词（包含当前轮的历史消息、用户资料和长期记忆）
+                    String structuredUserContext = userProfileService.buildStructuredContext(userId);
+                    String longTermMemoryContext = conversationPersistenceService.buildLongTermMemoryContext(userId, query);
+                    String systemPrompt = chatService.buildSystemPrompt(history, structuredUserContext, longTermMemoryContext);
+
+                    // 创建 ReactAgent
+                    ReactAgent agent = chatService.createReactAgent(chatModel, systemPrompt);
+                    // 使用 agent.stream() 进行流式对话
+                    stream = agent.stream(reWriteQuery).map(s -> s);
+                }
+
+
                 // 用于累积完整答案
                 StringBuilder fullAnswerBuilder = new StringBuilder();
                 
-                // 使用 agent.stream() 进行流式对话
-                Flux<NodeOutput> stream = agent.stream(request.getQuestion());
+
                 
                 stream.subscribe(
-                    output -> {
+                        obj -> {
                         try {
-                            // 检查是否为 StreamingOutput 类型
-                            if (output instanceof StreamingOutput streamingOutput) {
-                                OutputType type = streamingOutput.getOutputType();
-                                
-                                // 处理模型推理的流式输出
-                                if (type == OutputType.AGENT_MODEL_STREAMING) {
-                                    // 流式增量内容，逐步显示
-                                    String chunk = streamingOutput.message().getText();
-                                    if (chunk != null && !chunk.isEmpty()) {
-                                        fullAnswerBuilder.append(chunk);
-                                        
-                                        // 实时发送到前端
-                                        emitter.send(SseEmitter.event()
-                                                .name("message")
-                                                .data(SseMessage.content(chunk), MediaType.APPLICATION_JSON));
-                                        
-                                        logger.info("发送流式内容: {}", chunk);
+                            if (obj instanceof NodeOutput output) {
+                                // 检查是否为 StreamingOutput 类型
+                                if (output instanceof StreamingOutput streamingOutput) {
+                                    OutputType type = streamingOutput.getOutputType();
+
+                                    // 处理模型推理的流式输出
+                                    if (type == OutputType.AGENT_MODEL_STREAMING) {
+                                        // 流式增量内容，逐步显示
+                                        String chunk = streamingOutput.message().getText();
+                                        if (chunk != null && !chunk.isEmpty()) {
+                                            fullAnswerBuilder.append(chunk);
+
+                                            // 实时发送到前端
+                                            emitter.send(SseEmitter.event()
+                                                    .name("message")
+                                                    .data(SseMessage.content(chunk), MediaType.APPLICATION_JSON));
+
+                                            logger.info("发送流式内容: {}", chunk);
+                                        }
+                                    } else if (type == OutputType.AGENT_MODEL_FINISHED) {
+                                        // 模型推理完成
+                                        logger.info("模型输出完成");
+                                    } else if (type == OutputType.AGENT_TOOL_FINISHED) {
+                                        // 工具调用完成
+                                        logger.info("工具调用完成: {}", output.node());
+                                    } else if (type == OutputType.AGENT_HOOK_FINISHED) {
+                                        // Hook 执行完成
+                                        logger.debug("Hook 执行完成: {}", output.node());
                                     }
-                                } else if (type == OutputType.AGENT_MODEL_FINISHED) {
-                                    // 模型推理完成
-                                    logger.info("模型输出完成");
-                                } else if (type == OutputType.AGENT_TOOL_FINISHED) {
-                                    // 工具调用完成
-                                    logger.info("工具调用完成: {}", output.node());
-                                } else if (type == OutputType.AGENT_HOOK_FINISHED) {
-                                    // Hook 执行完成
-                                    logger.debug("Hook 执行完成: {}", output.node());
+                                }
+                            } else if (obj instanceof String chunk) {
+
+                                if (chunk != null && !chunk.isEmpty()) {
+                                    fullAnswerBuilder.append(chunk);
+
+                                    emitter.send(SseEmitter.event()
+                                            .name("message")
+                                            .data(SseMessage.content(chunk), MediaType.APPLICATION_JSON));
                                 }
                             }
                         } catch (IOException e) {
@@ -277,8 +335,8 @@ public class ChatController {
                                 request.getId(), fullAnswer.length());
                             
                             // 更新会话历史
-                            session.addMessage(request.getQuestion(), fullAnswer);
-                            conversationPersistenceService.saveRound(userId, request.getId(), request.getQuestion(), fullAnswer);
+                            sessionInfoService.addMessage(session,query, fullAnswer, httpSession);
+                            conversationPersistenceService.saveRound(userId, request.getId(), query, fullAnswer);
                             logger.info("已更新会话历史 - SessionId: {}, 当前消息对数: {}", 
                                 request.getId(), session.getMessagePairCount());
                             
@@ -407,23 +465,35 @@ public class ChatController {
 
 
     /**
+     * 获取当前用户会话列表
+     */
+    @GetMapping("/chat/sessions")
+    public ResponseEntity<ApiResponse<List<SessionInfoResponse.SessionSummary>>> getSessionSummaries(HttpSession httpSession) {
+        try {
+            Long userId = authService.requireUserId(httpSession);
+            logger.info("收到获取会话列表请求 - UserId: {}", userId);
+            List<SessionInfoResponse.SessionSummary> response = conversationPersistenceService.getSessionSummaries(userId);
+            return ResponseEntity.ok(ApiResponse.success(response));
+        } catch (Exception e) {
+            logger.error("获取会话列表失败", e);
+            return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
+        }
+    }
+
+    /**
      * 获取会话信息
      */
     @GetMapping("/chat/session/{sessionId}")
-    public ResponseEntity<ApiResponse<SessionInfoResponse>> getSessionInfo(@PathVariable String sessionId) {
+    public ResponseEntity<ApiResponse<SessionInfoResponse>> getSessionInfo(@PathVariable String sessionId, HttpSession httpSession) {
         try {
-            logger.info("收到获取会话信息请求 - SessionId: {}", sessionId);
+            Long userId = authService.requireUserId(httpSession);
+            logger.info("收到获取会话信息请求 - UserId: {}, SessionId: {}", userId, sessionId);
 
-            SessionInfo session = sessions.get(sessionId);
-            if (session != null) {
-                SessionInfoResponse response = new SessionInfoResponse();
-                response.setSessionId(sessionId);
-                response.setMessagePairCount(session.getMessagePairCount());
-                response.setCreateTime(session.createTime);
-                return ResponseEntity.ok(ApiResponse.success(response));
-            } else {
+            SessionInfoResponse response = conversationPersistenceService.getSessionInfo(userId, sessionId);
+            if (response == null) {
                 return ResponseEntity.ok(ApiResponse.error("会话不存在"));
             }
+            return ResponseEntity.ok(ApiResponse.success(response));
 
         } catch (Exception e) {
             logger.error("获取会话信息失败", e);
@@ -437,226 +507,10 @@ public class ChatController {
         if (sessionId == null || sessionId.isEmpty()) {
             sessionId = UUID.randomUUID().toString();
         }
-        return sessions.computeIfAbsent(sessionId, SessionInfo::new);
-    }
-
-    // ==================== 内部类 ====================
-
-    /**
-     * 会话信息
-     * 管理单个会话的历史消息，支持自动清理和线程安全
-     */
-    private static class SessionInfo {
-        private final String sessionId;
-        // 存储历史消息对：[{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
-        private final List<Map<String, String>> messageHistory;
-        private final long createTime;
-        private final ReentrantLock lock;
-
-        public SessionInfo(String sessionId) {
-            this.sessionId = sessionId;
-            this.messageHistory = new ArrayList<>();
-            this.createTime = System.currentTimeMillis();
-            this.lock = new ReentrantLock();
-        }
-
-        /**
-         * 添加一对消息（用户问题 + AI回复）
-         * 自动管理历史消息窗口大小
-         */
-        public void addMessage(String userQuestion, String aiAnswer) {
-            lock.lock();
-            try {
-                // 添加用户消息
-                Map<String, String> userMsg = new HashMap<>();
-                userMsg.put("role", "user");
-                userMsg.put("content", userQuestion);
-                messageHistory.add(userMsg);
-
-                // 添加AI回复
-                Map<String, String> assistantMsg = new HashMap<>();
-                assistantMsg.put("role", "assistant");
-                assistantMsg.put("content", aiAnswer);
-                messageHistory.add(assistantMsg);
-
-                // 自动清理：保持最多 MAX_WINDOW_SIZE 对消息
-                // 每对消息包含2条记录（user + assistant）
-                int maxMessages = MAX_WINDOW_SIZE * 2;
-                while (messageHistory.size() > maxMessages) {
-                    // 成对删除最旧的消息（删除前2条）
-                    messageHistory.remove(0); // 删除最旧的用户消息
-                    if (!messageHistory.isEmpty()) {
-                        messageHistory.remove(0); // 删除对应的AI回复
-                    }
-                }
-
-                logger.debug("会话 {} 更新历史消息，当前消息对数: {}", 
-                    sessionId, messageHistory.size() / 2);
-
-            } finally {
-                lock.unlock();
-            }
-        }
-
-        /**
-         * 获取历史消息（线程安全）
-         * 返回副本以避免并发修改
-         */
-        public List<Map<String, String>> getHistory() {
-            lock.lock();
-            try {
-                return new ArrayList<>(messageHistory);
-            } finally {
-                lock.unlock();
-            }
-        }
-
-        /**
-         * 清空历史消息
-         */
-        public void clearHistory() {
-            lock.lock();
-            try {
-                messageHistory.clear();
-                logger.info("会话 {} 历史消息已清空", sessionId);
-            } finally {
-                lock.unlock();
-            }
-        }
-
-        /**
-         * 获取当前消息对数
-         */
-        public int getMessagePairCount() {
-            lock.lock();
-            try {
-                return messageHistory.size() / 2;
-            } finally {
-                lock.unlock();
-            }
-        }
-    }
-
-    /**
-     * 聊天请求
-     */
-    @Setter
-    @Getter
-    public static class ChatRequest {
-        @com.fasterxml.jackson.annotation.JsonProperty(value = "Id")
-        @com.fasterxml.jackson.annotation.JsonAlias({"id", "ID"})
-        private String Id;
-        
-        @com.fasterxml.jackson.annotation.JsonProperty(value = "Question")
-        @com.fasterxml.jackson.annotation.JsonAlias({"question", "QUESTION"})
-        private String Question;
-
-    }
-
-    /**
-     * 清空会话请求
-     */
-    @Setter
-    @Getter
-    public static class ClearRequest {
-        @com.fasterxml.jackson.annotation.JsonProperty(value = "Id")
-        @com.fasterxml.jackson.annotation.JsonAlias({"id", "ID"})
-        private String Id;
-    }
-
-    // ==================== 内部类 ====================
-
-    /**
-     * 会话信息响应
-     */
-    @Setter
-    @Getter
-    public static class SessionInfoResponse {
-        private String sessionId;
-        private int messagePairCount;
-        private long createTime;
-    }
-
-    /**
-     * 统一聊天响应格式
-     * 适用于所有普通返回模式的对话接口
-     */
-    @Setter
-    @Getter
-    public static class ChatResponse {
-        private boolean success;
-        private String answer;
-        private String errorMessage;
-
-        public static ChatResponse success(String answer) {
-            ChatResponse response = new ChatResponse();
-            response.setSuccess(true);
-            response.setAnswer(answer);
-            return response;
-        }
-
-        public static ChatResponse error(String errorMessage) {
-            ChatResponse response = new ChatResponse();
-            response.setSuccess(false);
-            response.setErrorMessage(errorMessage);
-            return response;
-        }
-    }
-
-    /**
-     * 统一 SSE 流式消息格式
-     * 适用于所有 SSE 流式返回模式的对话接口
-     */
-    @Setter
-    @Getter
-    public static class SseMessage {
-        private String type;  // content: 内容块, error: 错误, done: 完成
-        private String data;
-
-        public static SseMessage content(String data) {
-            SseMessage message = new SseMessage();
-            message.setType("content");
-            message.setData(data);
-            return message;
-        }
-
-        public static SseMessage error(String errorMessage) {
-            SseMessage message = new SseMessage();
-            message.setType("error");
-            message.setData(errorMessage);
-            return message;
-        }
-
-        public static SseMessage done() {
-            SseMessage message = new SseMessage();
-            message.setType("done");
-            message.setData(null);
-            return message;
-        }
+        return sessions.computeIfAbsent(sessionId, id -> sessionInfoService.createSessionInfo(id));
     }
 
 
-    @Getter
-    @Setter
-    public static class ApiResponse<T> {
-        private int code;
-        private String message;
-        private T data;
 
-        public static <T> ApiResponse<T> success(T data) {
-            ApiResponse<T> response = new ApiResponse<>();
-            response.setCode(200);
-            response.setMessage("success");
-            response.setData(data);
-            return response;
-        }
 
-        public static <T> ApiResponse<T> error(String message) {
-            ApiResponse<T> response = new ApiResponse<>();
-            response.setCode(500);
-            response.setMessage(message);
-            return response;
-        }
-
-    }
 }
