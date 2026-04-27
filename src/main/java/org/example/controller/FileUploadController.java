@@ -2,6 +2,7 @@ package org.example.controller;
 
 import jakarta.servlet.http.HttpSession;
 import org.example.config.FileUploadConfig;
+import org.example.model.dto.ApiResponse;
 import org.example.model.dto.FileUploadRes;
 import org.example.service.AuthService;
 import org.example.service.VectorIndexService;
@@ -115,38 +116,7 @@ public class FileUploadController {
         }
     }
 
-    /**
-     * 统一 API 响应格式
-     */
-    public static class ApiResponse<T> {
-        private int code;
-        private String message;
-        private T data;
 
-        public int getCode() {
-            return code;
-        }
-
-        public void setCode(int code) {
-            this.code = code;
-        }
-
-        public String getMessage() {
-            return message;
-        }
-
-        public void setMessage(String message) {
-            this.message = message;
-        }
-
-        public T getData() {
-            return data;
-        }
-
-        public void setData(T data) {
-            this.data = data;
-        }
-    }
 
     private String getFileExtension(String filename) {
         int lastIndexOf = filename.lastIndexOf(".");

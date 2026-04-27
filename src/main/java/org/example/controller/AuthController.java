@@ -3,6 +3,7 @@ package org.example.controller;
 import jakarta.servlet.http.HttpSession;
 import lombok.Getter;
 import lombok.Setter;
+import org.example.model.dto.ApiResponse;
 import org.example.model.entity.FatLossUserProfile;
 import org.example.service.AuthService;
 import org.example.service.UserProfileService;
@@ -68,26 +69,5 @@ public class AuthController {
     public record AuthMeResponse(AuthService.AuthUser user, FatLossUserProfile profile) {
     }
 
-    @Getter
-    @Setter
-    public static class ApiResponse<T> {
-        private int code;
-        private String message;
-        private T data;
 
-        public static <T> ApiResponse<T> success(T data) {
-            ApiResponse<T> response = new ApiResponse<>();
-            response.setCode(200);
-            response.setMessage("success");
-            response.setData(data);
-            return response;
-        }
-
-        public static <T> ApiResponse<T> error(String message) {
-            ApiResponse<T> response = new ApiResponse<>();
-            response.setCode(500);
-            response.setMessage(message);
-            return response;
-        }
-    }
 }

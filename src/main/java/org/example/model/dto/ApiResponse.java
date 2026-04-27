@@ -2,8 +2,15 @@ package org.example.model.dto;
 
 import lombok.Data;
 
+import java.io.Serial;
+import java.io.Serializable;
+
 @Data
-public class ApiResponse<T> {
+public class ApiResponse<T> implements Serializable {
+
+    @Serial
+    private static final long serialVersionUID = -6548579745978588218L;
+
     private int code;
     private String message;
     private T data;
