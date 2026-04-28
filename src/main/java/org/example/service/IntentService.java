@@ -1,9 +1,8 @@
 package org.example.service;
 
 import jakarta.annotation.Resource;
+import org.example.model.rag.MilvusSearchResult;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.rag.preretrieval.query.transformation.RewriteQueryTransformer;
-import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
@@ -61,7 +60,7 @@ public class IntentService {
             ragService.queryStream(query, new RagService.StreamCallback() {
 
                 @Override
-                public void onSearchResults(List<VectorSearchService.SearchResult> results) {
+                public void onSearchResults(List<MilvusSearchResult> results) {
 
                 }
 

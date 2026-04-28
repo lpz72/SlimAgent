@@ -13,6 +13,7 @@ import lombok.Getter;
 import lombok.Setter;
 import org.example.constant.MilvusConstants;
 import org.example.model.dto.DocumentChunk;
+import org.example.model.es.EsChunkDocument;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -43,6 +44,9 @@ public class VectorIndexService {
 
     @Autowired
     private DocumentChunkService chunkService;
+
+    @Autowired
+    private EsKeywordSearchService esKeywordSearchService;
 
     @Value("${file.upload.path}")
     private String uploadPath;
@@ -156,7 +160,8 @@ public class VectorIndexService {
                 Map<String, Object> metadata = buildMetadata(path.toString(), chunk, chunks.size());
 
                 // 插入到 Milvus
-                insertToMilvus(chunk.getContent(), vector, metadata, chunk.getChunkIndex());
+                String chunkId = insertToMilvus(chunk.getContent(), vector, metadata, chunk.getChunkIndex());
+                indexToElasticsearch(chunkId, chunk.getContent());
                 
                 logger.info("✓ 分片 {}/{} 索引成功", i + 1, chunks.size());
 
@@ -254,8 +259,8 @@ public class VectorIndexService {
     /**
      * 插入向量到 Milvus
      */
-    private void insertToMilvus(String content, List<Float> vector, 
-                                Map<String, Object> metadata, int chunkIndex) throws Exception {
+    private String insertToMilvus(String content, List<Float> vector, 
+                                  Map<String, Object> metadata, int chunkIndex) throws Exception {
         try {
             // 确保 collection 已加载
             R<RpcStatus> loadResponse = milvusClient.loadCollection(
@@ -303,11 +308,19 @@ public class VectorIndexService {
             }
 
             logger.debug("向量插入成功: id={}, source={}, chunk={}", id, source, chunkIndex);
+            return id;
 
         } catch (Exception e) {
             logger.error("插入向量到 Milvus 失败", e);
             throw e;
         }
+    }
+
+    private void indexToElasticsearch(String chunkId, String content) {
+        EsChunkDocument document = new EsChunkDocument();
+        document.setChunkId(chunkId);
+        document.setContent(content);
+        esKeywordSearchService.indexChunk(document);
     }
 
     /**

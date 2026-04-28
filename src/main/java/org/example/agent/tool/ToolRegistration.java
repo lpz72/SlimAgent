@@ -1,6 +1,7 @@
 package org.example.agent.tool;
 
 import jakarta.annotation.Resource;
+import org.example.service.HybridRagSearchService;
 import org.example.service.VectorIndexService;
 import org.example.service.VectorSearchService;
 import org.springframework.ai.support.ToolCallbacks;
@@ -16,14 +17,14 @@ import org.springframework.context.annotation.Configuration;
 public class ToolRegistration {
 
     @Resource
-    private VectorSearchService vectorSearchService;
+    private HybridRagSearchService hybridRagSearchService;
 
 
     @Bean
     public ToolCallback[] localTools() {
         DateTimeTools dateTimeTools = new DateTimeTools();
         FatLossCalculatorTools fatLossCalculatorTools = new FatLossCalculatorTools();
-        InternalDocsTools rag = new InternalDocsTools(vectorSearchService);
+        InternalDocsTools rag = new InternalDocsTools(hybridRagSearchService);
         return ToolCallbacks.from(
                 dateTimeTools,
                 fatLossCalculatorTools,

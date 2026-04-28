@@ -10,23 +10,17 @@ import com.alibaba.dashscope.exception.InputRequiredException;
 import com.alibaba.dashscope.exception.NoApiKeyException;
 import com.alibaba.dashscope.utils.Constants;
 import io.reactivex.Flowable;
-import jakarta.annotation.Resource;
+import org.example.model.rag.MilvusSearchResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PostConstruct;
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * RAG (Retrieval-Augmented Generation) 服务
@@ -38,9 +32,9 @@ public class RagService {
     private static final Logger logger = LoggerFactory.getLogger(RagService.class);
 
     @Autowired
-    private VectorSearchService vectorSearchService;
+    private HybridRagSearchService hybridRagSearchService;
 
-    @Value("${dashscope.api.key}")
+    @Value("${spring.ai.dashscope.api-key}")
     private String apiKey;
 
     @Value("${rag.top-k:3}")
@@ -86,8 +80,8 @@ public class RagService {
             logger.info("收到 RAG 流式查询: {}", question);
 
             // 1. 从向量数据库检索相关文档
-            List<VectorSearchService.SearchResult> searchResults =
-                vectorSearchService.searchSimilarDocuments(question, topK);
+            List<MilvusSearchResult> searchResults =
+                hybridRagSearchService.search(question, topK);
 
             // 发送检索结果
             callback.onSearchResults(searchResults);
@@ -114,11 +108,11 @@ public class RagService {
     /**
      * 构建上下文
      */
-    private String buildContext(List<VectorSearchService.SearchResult> searchResults) {
+    private String buildContext(List<MilvusSearchResult> searchResults) {
         StringBuilder context = new StringBuilder();
         
         for (int i = 0; i < searchResults.size(); i++) {
-            VectorSearchService.SearchResult result = searchResults.get(i);
+            MilvusSearchResult result = searchResults.get(i);
             context.append("【参考资料 ").append(i + 1).append("】\n");
             context.append(result.getContent()).append("\n\n");
         }
@@ -239,8 +233,8 @@ public class RagService {
             logger.info("收到 RAG 流式查询: {}", question);
 
             // 1. 从向量数据库检索相关文档
-            List<VectorSearchService.SearchResult> searchResults =
-                    vectorSearchService.searchSimilarDocuments(question, topK);
+            List<MilvusSearchResult> searchResults =
+                    hybridRagSearchService.search(question, topK);
 
 
             if (searchResults.isEmpty()) {
@@ -322,7 +316,7 @@ public class RagService {
      * 流式回调接口
      */
     public interface StreamCallback {
-        void onSearchResults(List<VectorSearchService.SearchResult> results);
+        void onSearchResults(List<MilvusSearchResult> results);
         void onReasoningChunk(String chunk);
         void onContentChunk(String chunk);
         void onComplete(String fullContent, String fullReasoning);

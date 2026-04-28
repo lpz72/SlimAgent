@@ -1,6 +1,9 @@
 package org.example.agent.tool;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.Resource;
+import org.example.model.rag.MilvusSearchResult;
+import org.example.service.HybridRagSearchService;
 import org.example.service.VectorSearchService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,7 +27,7 @@ public class InternalDocsTools {
     /** 工具名常量，用于动态构建提示词 */
     public static final String TOOL_QUERY_INTERNAL_DOCS = "queryInternalDocs";
     
-    private final VectorSearchService vectorSearchService;
+    private final HybridRagSearchService hybridRagSearchService;
     
     @Value("${rag.top-k:3}")
     private int topK = 5; // 默认值
@@ -36,8 +39,8 @@ public class InternalDocsTools {
      * Spring 会自动注入 VectorSearchService
      */
     @Autowired
-    public InternalDocsTools(VectorSearchService vectorSearchService) {
-        this.vectorSearchService = vectorSearchService;
+    public InternalDocsTools(HybridRagSearchService hybridRagSearchService) {
+        this.hybridRagSearchService = hybridRagSearchService;
     }
     
     /**
@@ -56,10 +59,10 @@ public class InternalDocsTools {
             String query) {
 
         try {
-            // 向量检索
-            List<VectorSearchService.SearchResult> searchResults =
-                    vectorSearchService.searchSimilarDocuments(query, topK);
+            // 混合检索
+            List<MilvusSearchResult> searchResults = hybridRagSearchService.search(query,topK);
 
+            logger.info("调用工具 queryInternalDocs，查询内容：{}", query);
             if (searchResults == null || searchResults.isEmpty()) {
                 return "{\"status\": \"no_results\", \"message\": \"No relevant knowledge found.\"}";
             }
@@ -68,7 +71,7 @@ public class InternalDocsTools {
             return objectMapper.writeValueAsString(searchResults);
 
         } catch (Exception e) {
-            logger.error("[工具错误] queryKnowledgeBase 执行失败", e);
+            logger.error("[工具错误] queryInternalDocs 执行失败", e);
             return String.format("{\"status\": \"error\", \"message\": \"RAG query failed: %s\"}",
                     e.getMessage());
         }

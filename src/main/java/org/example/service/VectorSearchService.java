@@ -7,9 +7,8 @@ import io.milvus.grpc.SearchResults;
 import io.milvus.param.R;
 import io.milvus.param.dml.SearchParam;
 import io.milvus.response.SearchResultsWrapper;
-import lombok.Getter;
-import lombok.Setter;
 import org.example.constant.MilvusConstants;
+import org.example.model.rag.MilvusSearchResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -48,7 +47,7 @@ public class VectorSearchService {
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
 
-    @Value("${dashscope.api.key}")
+    @Value("${spring.ai.dashscope.api-key}")
     private String apiKey;
 
     @Value("${rag.rerank.enabled:true}")
@@ -81,7 +80,11 @@ public class VectorSearchService {
      * @param topK 返回最相似的K个结果
      * @return 搜索结果列表
      */
-    public List<SearchResult> searchSimilarDocuments(String query, int topK) {
+    public List<MilvusSearchResult> searchSimilarDocuments(String query, int topK) {
+        return searchSimilarDocuments(query, topK, true);
+    }
+
+    public List<MilvusSearchResult> searchSimilarDocuments(String query, int topK, boolean applyRerank) {
         try {
             logger.info("开始搜索相似文档, 查询: {}, topK: {}", query, topK);
 
@@ -109,10 +112,10 @@ public class VectorSearchService {
 
             // 4. 解析搜索结果
             SearchResultsWrapper wrapper = new SearchResultsWrapper(searchResponse.getData().getResults());
-            List<SearchResult> results = new ArrayList<>();
+            List<MilvusSearchResult> results = new ArrayList<>();
 
             for (int i = 0; i < wrapper.getRowRecords(0).size(); i++) {
-                SearchResult result = new SearchResult();
+                MilvusSearchResult result = new MilvusSearchResult();
                 result.setId((String) wrapper.getIDScore(0).get(i).get("id"));
                 result.setContent((String) wrapper.getFieldData("content", 0).get(i));
                 result.setScore(wrapper.getIDScore(0).get(i).getScore());
@@ -126,8 +129,13 @@ public class VectorSearchService {
                 results.add(result);
             }
 
+            if (!applyRerank) {
+                logger.info("搜索完成, 找到 {} 个相似文档, 跳过重排序", results.size());
+                return results;
+            }
+
             // 重排序，返回top-3
-            List<SearchResult> rerankedResults = rerankResults(query, results);
+            List<MilvusSearchResult> rerankedResults = rerankResults(query, results);
             logger.info("搜索完成, 找到 {} 个相似文档, 重排序后返回 {} 个文档", results.size(), rerankedResults.size());
             return rerankedResults;
 
@@ -137,7 +145,7 @@ public class VectorSearchService {
         }
     }
 
-    private List<SearchResult> rerankResults(String query, List<SearchResult> results) {
+    private List<MilvusSearchResult> rerankResults(String query, List<MilvusSearchResult> results) {
         if (!rerankEnabled || results.size() <= 1) {
             return results;
         }
@@ -148,7 +156,7 @@ public class VectorSearchService {
             headers.setBearerAuth(apiKey);
 
             List<String> documents = results.stream()
-                    .map(SearchResult::getContent)
+                    .map(MilvusSearchResult::getContent)
                     .toList();
 
             Map<String, Object> input = new HashMap<>();
@@ -181,14 +189,14 @@ public class VectorSearchService {
                 return results;
             }
 
-            List<SearchResult> rerankedResults = new ArrayList<>();
+            List<MilvusSearchResult> rerankedResults = new ArrayList<>();
             for (JsonNode item : outputResults) {
                 int index = item.path("index").asInt(-1);
                 if (index < 0 || index >= results.size()) {
                     continue;
                 }
 
-                SearchResult result = results.get(index);
+                MilvusSearchResult result = results.get(index);
                 result.setScore((float) item.path("relevance_score").asDouble(result.getScore()));
                 rerankedResults.add(result);
             }
@@ -197,7 +205,7 @@ public class VectorSearchService {
                 return results;
             }
 
-            rerankedResults.sort(Comparator.comparingDouble(SearchResult::getScore).reversed());
+            rerankedResults.sort(Comparator.comparingDouble(MilvusSearchResult::getScore).reversed());
             logger.info("重排序完成，模型: {}, 输入文档数: {}, 输出文档数: {}",
                     rerankModel, results.size(), rerankedResults.size());
             return rerankedResults;
@@ -208,16 +216,5 @@ public class VectorSearchService {
         }
     }
 
-    /**
-     * 搜索结果类
-     */
-    @Setter
-    @Getter
-    public static class SearchResult {
-        private String id;
-        private String content;
-        private float score;
-        private String metadata;
 
-    }
 }

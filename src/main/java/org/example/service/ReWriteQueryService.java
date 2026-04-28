@@ -1,6 +1,9 @@
 package org.example.service;
 
 import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatModel;
+import org.example.controller.ChatController;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.stereotype.Service;
@@ -10,6 +13,8 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class ReWriteQueryService {
+
+    private static final Logger logger = LoggerFactory.getLogger(ReWriteQueryService.class);
 
     private final ChatClient chatClient;
 
@@ -36,7 +41,9 @@ public class ReWriteQueryService {
                 【输出要求】
                 只输出1条改写后的查询，不要解释。
                 """;
-        return chatClient.prompt(prompt.replace("{query}", query)).call().content();
+        String result = chatClient.prompt(prompt.replace("{query}", query)).call().content();
+        logger.info("改写结果：{}", result);
+        return result;
     }
 
 }
