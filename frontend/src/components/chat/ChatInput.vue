@@ -2,7 +2,7 @@
   <div class="chat-input-container">
     <div class="input-group-wrapper">
       <div class="input-wrapper">
-        <input v-model="message" type="text" placeholder="问问智能减脂助手" maxlength="1000" class="message-input" :disabled="disabled" @keypress.enter.prevent="submit" />
+        <textarea ref="textareaEl" v-model="message" rows="1" placeholder="问问智能减脂助手" maxlength="1000" class="message-input" :disabled="disabled" @input="resizeTextarea" @keydown.enter.exact.prevent="submit" />
         <div class="input-bottom-bar">
           <ToolsMenu :is-admin="isAdmin" @upload="$emit('upload', $event)" />
           <div class="right-actions">
@@ -20,7 +20,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import ModeSelector from './ModeSelector.vue'
 import ToolsMenu from './ToolsMenu.vue'
 import type { ChatMode } from '@/types'
@@ -28,8 +28,20 @@ import type { ChatMode } from '@/types'
 defineProps<{ mode: ChatMode; disabled: boolean; isAdmin: boolean }>()
 const emit = defineEmits<{ send: [message: string]; 'select-mode': [mode: ChatMode]; upload: [file: File] }>()
 const message = ref('')
-function submit() {
+const textareaEl = ref<HTMLTextAreaElement | null>(null)
+
+function resizeTextarea() {
+  const textarea = textareaEl.value
+  if (!textarea) return
+  textarea.style.height = 'auto'
+  textarea.style.height = `${textarea.scrollHeight}px`
+}
+
+async function submit() {
+  if (!message.value.trim()) return
   emit('send', message.value)
   message.value = ''
+  await nextTick()
+  resizeTextarea()
 }
 </script>

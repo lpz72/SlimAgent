@@ -37,7 +37,7 @@ public class RagService {
     @Value("${spring.ai.dashscope.api-key}")
     private String apiKey;
 
-    @Value("${rag.top-k:3}")
+    @Value("${rag.top-k:5}")
     private int topK;
 
     @Value("${rag.model:qwen3-30b-a3b-thinking-2507}")

@@ -39,7 +39,7 @@ public class EsKeywordSearchService {
             SearchResponse<EsChunkDocument> response = elasticsearchClient.search(search -> search
                             .index(indexName)
                             .size(topK)
-                            .source(source -> source.filter(filter -> filter.includes("chunkId")))
+                            .source(source -> source.filter(filter -> filter.includes("chunkId", "content")))
                             .query(queryBuilder -> queryBuilder.match(match -> match
                                     .field("content")
                                     .query(query))),
@@ -60,16 +60,17 @@ public class EsKeywordSearchService {
 
                 EsKeywordHit hit = new EsKeywordHit();
                 hit.setChunkId(chunkId);
+                hit.setContent(document == null ? null : document.getContent());
                 hit.setRank(rank++);
                 hit.setScore(hitNode.score());
                 results.add(hit);
             }
 
-            logger.info("ES 关键字搜索 完成, query={}, hits={}", query, results.size());
+            logger.info("ES 关键字搜索完成，查询={}，命中数={}", query, results.size());
             return results;
 
         } catch (Exception e) {
-            logger.warn("ES 关键字搜索 失败，: {}", e.getMessage());
+            logger.warn("ES 关键字搜索失败：{}", e.getMessage());
             return List.of();
         }
     }
@@ -84,9 +85,9 @@ public class EsKeywordSearchService {
                     .index(indexName)
                     .id(document.getChunkId())
                     .document(document));
-            logger.info("插入 ES chunk 成功, chunkId={}", document.getChunkId());
+            logger.info("插入 ES 分片成功，分片ID={}", document.getChunkId());
         } catch (Exception e) {
-            logger.warn("插入 ES chunk 失败, chunkId={}: {}", document.getChunkId(), e.getMessage());
+            logger.warn("插入 ES 分片失败，分片ID={}：{}", document.getChunkId(), e.getMessage());
         }
     }
 
@@ -100,7 +101,7 @@ public class EsKeywordSearchService {
                     .index(indexName)
                     .id(chunkId));
         } catch (Exception e) {
-            logger.warn("删除 ES chunk 失败, chunkId={}: {}", chunkId, e.getMessage());
+            logger.warn("删除 ES 分片失败，分片ID={}：{}", chunkId, e.getMessage());
         }
     }
 }

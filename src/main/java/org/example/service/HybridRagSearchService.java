@@ -8,7 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -24,11 +24,20 @@ public class HybridRagSearchService {
     @Autowired
     private EsKeywordSearchService esKeywordSearchService;
 
+    @Autowired
+    private RerankService rerankService;
+
     @Value("${rag.hybrid.enabled:true}")
     private boolean enabled;
 
-    @Value("${rag.hybrid.candidate-multiplier:4}")
-    private int candidateMultiplier;
+    @Value("${rag.hybrid.vector-candidate-k:20}")
+    private int vectorCandidateK;
+
+    @Value("${rag.hybrid.es-candidate-k:20}")
+    private int esCandidateK;
+
+    @Value("${rag.hybrid.fusion-top-k:20}")
+    private int fusionTopK;
 
     @Value("${rag.hybrid.rrf-k:60}")
     private int rrfK;
@@ -44,58 +53,115 @@ public class HybridRagSearchService {
             return vectorSearchService.searchSimilarDocuments(query, topK);
         }
 
-        int candidateK = Math.max(topK, topK * Math.max(1, candidateMultiplier));
+        int finalTopK = Math.max(1, topK);
+        int vectorK = Math.max(finalTopK, vectorCandidateK);
+        int esK = Math.max(finalTopK, esCandidateK);
+        int rerankInputK = Math.max(finalTopK, fusionTopK);
+
         List<MilvusSearchResult> vectorResults =
-                vectorSearchService.searchSimilarDocuments(query, candidateK, false);
-        List<EsKeywordHit> keywordHits = esKeywordSearchService.searchKeyword(query, candidateK);
+                vectorSearchService.searchSimilarDocuments(query, vectorK, false);
+        List<EsKeywordHit> keywordHits = esKeywordSearchService.searchKeyword(query, esK);
 
-        if (vectorResults.isEmpty() || keywordHits.isEmpty()) {
-            List<MilvusSearchResult> fallback = vectorResults.isEmpty()
-                    ? vectorResults
-                    : vectorResults.stream().limit(topK).toList();
-            logger.info("混合 RAG 召回, vectorResults={}, keywordHits={}",
+        Map<String, HybridCandidate> candidates = new LinkedHashMap<>();
+        mergeVectorCandidates(candidates, vectorResults);
+        mergeEsCandidates(candidates, keywordHits);
+
+        List<MilvusSearchResult> fusedResults = candidates.values().stream()
+                .peek(this::calculateRrfScore)
+                .filter(candidate -> candidate.content != null && !candidate.content.isBlank())
+                .sorted(Comparator.comparingDouble(HybridCandidate::getFusedScore).reversed())
+                .limit(rerankInputK)
+                .map(HybridCandidate::toMilvusSearchResult)
+                .toList();
+
+        if (fusedResults.isEmpty()) {
+            logger.info("混合 RAG 未找到可用候选，向量结果数={}，ES 结果数={}",
                     vectorResults.size(), keywordHits.size());
-            return fallback;
+            return List.of();
         }
 
-        Map<String, MilvusSearchResult> resultById = new LinkedHashMap<>();
-        Map<String, Double> rrfScores = new LinkedHashMap<>();
-
-        for (int i = 0; i < vectorResults.size(); i++) {
-            MilvusSearchResult result = vectorResults.get(i);
-            if (result.getId() == null || resultById.containsKey(result.getId())) {
-                continue;
-            }
-            resultById.put(result.getId(), result);
-            addRrfScore(rrfScores, result.getId(), i + 1, vectorWeight);
-        }
-
-        for (EsKeywordHit hit : keywordHits) {
-            if (hit.getChunkId() == null || !resultById.containsKey(hit.getChunkId())) {
-                continue;
-            }
-            int rank = hit.getRank() == null ? keywordHits.indexOf(hit) + 1 : hit.getRank();
-            addRrfScore(rrfScores, hit.getChunkId(), rank, esWeight);
-        }
-
-        List<MilvusSearchResult> fusedResults = new ArrayList<>(resultById.values());
-        fusedResults.sort((left, right) -> Double.compare(
-                rrfScores.getOrDefault(right.getId(), 0.0),
-                rrfScores.getOrDefault(left.getId(), 0.0)
-        ));
-
-        List<MilvusSearchResult> topResults = fusedResults.stream().limit(topK).toList();
-        for (MilvusSearchResult result : topResults) {
-            result.setScore(rrfScores.getOrDefault(result.getId(), 0.0).floatValue());
-        }
-
-        logger.info("混合 RAG 搜索完成, vectorResults={}, keywordHits={}, fusedResults={}",
-                vectorResults.size(), keywordHits.size(), topResults.size());
-        return topResults;
+        List<MilvusSearchResult> rerankedResults = rerankService.rerank(query, fusedResults, finalTopK);
+        logger.info("混合 RAG 检索完成，向量结果数={}，ES 结果数={}，合并候选数={}，"
+                        + "融合候选数={}，最终结果数={}",
+                vectorResults.size(), keywordHits.size(), candidates.size(),
+                fusedResults.size(), rerankedResults.size());
+        return rerankedResults;
     }
 
-    private void addRrfScore(Map<String, Double> scores, String chunkId, int rank, double weight) {
-        double score = weight / (rrfK + rank);
-        scores.merge(chunkId, score, Double::sum);
+    private void mergeVectorCandidates(
+            Map<String, HybridCandidate> candidates,
+            List<MilvusSearchResult> vectorResults) {
+        for (int i = 0; i < vectorResults.size(); i++) {
+            MilvusSearchResult result = vectorResults.get(i);
+            if (result.getId() == null || result.getId().isBlank()) {
+                continue;
+            }
+
+            HybridCandidate candidate = candidates.computeIfAbsent(
+                    result.getId(),
+                    HybridCandidate::new
+            );
+            candidate.content = result.getContent();
+            candidate.metadata = result.getMetadata();
+            candidate.vectorRank = i + 1;
+        }
+    }
+
+    private void mergeEsCandidates(
+            Map<String, HybridCandidate> candidates,
+            List<EsKeywordHit> keywordHits) {
+        for (int i = 0; i < keywordHits.size(); i++) {
+            EsKeywordHit hit = keywordHits.get(i);
+            if (hit.getChunkId() == null || hit.getChunkId().isBlank()) {
+                continue;
+            }
+
+            HybridCandidate candidate = candidates.computeIfAbsent(
+                    hit.getChunkId(),
+                    HybridCandidate::new
+            );
+            if (candidate.content == null || candidate.content.isBlank()) {
+                candidate.content = hit.getContent();
+            }
+            candidate.esRank = hit.getRank() == null ? i + 1 : hit.getRank();
+        }
+    }
+
+    private void calculateRrfScore(HybridCandidate candidate) {
+        double score = 0.0;
+        if (candidate.vectorRank != null) {
+            score += vectorWeight / (rrfK + candidate.vectorRank);
+        }
+        if (candidate.esRank != null) {
+            score += esWeight / (rrfK + candidate.esRank);
+        }
+        candidate.fusedScore = score;
+    }
+
+    private static class HybridCandidate {
+
+        private final String chunkId;
+        private String content;
+        private String metadata;
+        private Integer vectorRank;
+        private Integer esRank;
+        private double fusedScore;
+
+        private HybridCandidate(String chunkId) {
+            this.chunkId = chunkId;
+        }
+
+        private double getFusedScore() {
+            return fusedScore;
+        }
+
+        private MilvusSearchResult toMilvusSearchResult() {
+            MilvusSearchResult result = new MilvusSearchResult();
+            result.setId(chunkId);
+            result.setContent(content);
+            result.setMetadata(metadata);
+            result.setScore((float) fusedScore);
+            return result;
+        }
     }
 }
