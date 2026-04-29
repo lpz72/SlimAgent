@@ -12,7 +12,7 @@
     </parent>
 
     <groupId>org.example</groupId>
-    <artifactId>super-biz-agent</artifactId>
+    <artifactId>SlimAgent</artifactId>
     <version>1.0-SNAPSHOT</version>
 
     <properties>

@@ -56,4 +56,6 @@ uploads/
 /server.pid
 /frontend/dist/
 /frontend/node_modules/
-application-local.yml
+application.yml
+/src/main/resources/application-prod.yml
+/src/main/resources/application.yml

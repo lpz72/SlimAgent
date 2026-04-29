@@ -285,7 +285,7 @@ public class SessionInfo {
                 return existingSummary;
             }
 
-            String prompt = SUMMARIZE_PROMPT;
+            String prompt = SUMMARIZE_PROMPT.replace("{{score_threshold}}", "0.70");
 
             if (existingSummary != null && !existingSummary.isBlank()) {
                 prompt = prompt.replace("{{existing_summary}}", existingSummary);
